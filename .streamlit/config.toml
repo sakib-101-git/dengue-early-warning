@@ -1,0 +1,26 @@
+[theme]
+# Base theme. app/theme.py holds the same tokens plus the CSS that styles everything else.
+base = "light"
+primaryColor = "#0B6A80"
+backgroundColor = "#FAFAF9"
+secondaryBackgroundColor = "#F4F4F5"
+textColor = "#18181B"
+borderColor = "#D4D4D8"
+showWidgetBorder = true
+linkColor = "#0B6A80"
+font = "Geist, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif"
+baseFontSize = 14
+baseRadius = "10px"
+buttonRadius = "10px"
+dataframeBorderColor = "#E4E7EC"
+dataframeHeaderBackgroundColor = "#F9FAFB"
+dataframeHeaderTextColor = "#475467"
+
+[client]
+toolbarMode = "minimal"
+
+[server]
+headless = true
+
+[browser]
+gatherUsageStats = false

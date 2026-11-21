@@ -1,0 +1,133 @@
+# 💧 Dengue Watch: Urban Dengue Early-Warning System
+
+**EDU AI Engineering Hackathon 2026 — Phase 1: AI for Urban Dengue Outbreak**
+
+Predicts **ward-level dengue risk 2–4 weeks ahead** for 60 wards in Dhaka North, Dhaka South,
+Chattogram, Gazipur and Narayanganj. It uses multi-week rainfall, temperature and humidity lags
+plus each ward's water-logging, density and sanitation profile. Health officers get a risk tier
+(**Low / Medium / High / Critical**), expected cases with an 80% interval, and the weather drivers
+behind each forecast, so larvicide and spraying teams can be sent *before* admissions spike.
+
+## Quick start (about 1 minute)
+
+Requires Python 3.10+ (tested on 3.12, 3.13 and 3.14).
+
+```bash
+git clone https://github.com/sakib-101-git/dengue-early-warning.git
+cd dengue-early-warning
+python -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+python -m server
+```
+
+Open http://127.0.0.1:8000 (a browser tab opens automatically). Trained models are already in `models/`, so no training is needed.
+
+Alternative UI (Streamlit):
+
+```bash
+pip install -r requirements-streamlit.txt
+streamlit run app/streamlit_app.py
+```
+
+**Optional:**
+
+```bash
+pip install -r requirements-dev.txt   # pytest, xgboost, optuna
+python -m pytest -q                   # lag-pipeline tests + API tests
+python -m src.train                   # retrain + regenerate models/metrics.json (~3 min)
+python -m src.experiments             # ensembles, tuning, neural net vs. deployed model (~3 min)
+```
+
+## What the dashboard shows
+
+A custom web app (FastAPI JSON API + hand-written HTML/CSS/JS with ECharts, light and dark themes).
+Three views, switched from the top bar; every view's settings live in the URL, so links are shareable:
+
+- **Ward**
+  - A rain-to-risk hero: the last 12 weeks of rain hanging from a sky line, the breeding window highlighted, the weeks still ahead, and the forecast week coloured by risk.
+  - Expected cases with a likely range, and what actually happened.
+  - The factors pushing risk up or down (TreeSHAP).
+  - The season's forecast vs. recorded cases.
+  - **Simulate weather:** change recent rain, temperature or humidity and see the forecast update instantly.
+- **City:** how many wards need action, a ranked list of where to send teams first (click a ward to open it), and a ward × week risk heatmap for the year.
+- **Model:**
+  - Test accuracy in plain numbers.
+  - Error by model and by year.
+  - How a forecast is made, in 4 steps.
+
+## Results (held-out test 2024–2025, never used for training or tuning)
+
+| Horizon | MAE (cases/ward-week) | RMSE | Exact risk tier (of 4) | High-risk recall |
+|---|---|---|---|---|
+| 2 weeks | 0.995 | 1.99 | 79.8% | 87% |
+| 3 weeks | 1.019 | 2.01 | 78.9% | 84% |
+| 4 weeks | 1.161 | 2.28 | 77.2% | 86% |
+
+**As a yes/no outbreak alert (≥ 4 cases in a ward-week):** 93% accuracy, 94–95% of outbreaks caught,
+ROC-AUC 0.97–0.98 at both 2 and 4 weeks ahead.
+
+This is 1.7× more accurate than the "same week last year" baseline. Ensembles, tuning, neural
+networks and per-ward models were also tested, and none beat the deployed model. Full details
+are in [ARCHITECTURE.md](ARCHITECTURE.md).
+
+## Project structure
+
+```
+data/raw/dengue.csv        dataset provided by the organisers
+src/config.py              paths, horizons, split years
+src/data.py                load + validate
+src/features.py            multi-week ward-level lag pipeline
+src/tiers.py               Low/Medium/High/Critical cut-offs
+src/train.py               model comparison, training, metrics, joblib export
+src/predict.py             RiskEngine: forecasts, TreeSHAP drivers, what-if
+src/experiments.py         ensembles / tuning / neural-net comparison
+server/api.py              FastAPI JSON API over the RiskEngine + serves web/
+server/__main__.py         `python -m server` launcher (uvicorn, opens the browser)
+web/index.html             app shell (top bar, navigation, theme toggle)
+web/styles.css             design system: tokens, light/dark themes, components, motion
+web/js/                    ES modules: state/URL, API client, UI kit, ECharts theme, views
+web/vendor/echarts.min.js  Apache ECharts, vendored so the app works offline
+app/                       alternative Streamlit dashboard (pages, components, Plotly charts, theme)
+models/                    model_h{2,3,4}.joblib + metrics.json
+tests/test_features.py     lag/leakage tests
+tests/test_api.py          API tests: every endpoint, city, horizon, date edge and simulation extreme
+```
+
+## Tech stack
+
+- **Language:** Python
+- **Data:** pandas, NumPy
+- **Models:** LightGBM (Poisson + quantile), scikit-learn (Poisson GLM, Random Forest, MLP, metrics), XGBoost and Optuna (experiments only)
+- **Serialisation:** joblib
+- **Web app:** FastAPI + uvicorn, vanilla HTML/CSS/JS (no build step), Apache ECharts
+- **Alternative dashboard:** Streamlit, Plotly
+- **Tests:** pytest
+
+## Team
+
+| Member | Role |
+|---|---|
+| Syed Nazmus Sakib (Team Leader) | Data pipeline, lag features and leakage tests, FastAPI backend, ARCHITECTURE.md |
+| MD Sadman | Model training, chronological validation, risk tiers, experiments, City and Model views, API tests |
+| Misbah Uddin | Prediction engine, web frontend (design system, Ward view), Streamlit dashboard, README, demo video |
+
+## AI tools & external APIs disclosure
+
+| Tool / API | Used for |
+|---|---|
+| Claude (Anthropic, claude.ai) | Planning, exploring the data, drafting code for the feature pipeline, training script, inference engine and dashboard, and drafting documentation. The team reviewed, ran, tested and modified all code and can explain it. |
+| Claude Code (Anthropic) | Building the web frontend (server/, web/), API tests and the Streamlit restyle. The team reviewed, ran and tested all changes. |
+
+**External APIs at runtime: none.** The app makes no network calls and uses no LLM.
+
+## Attributions
+
+- Dataset: provided by the EDU AI Engineering Hackathon 2026 organisers.
+- Open-source libraries listed in `requirements.txt`. No third-party code snippets are copied into this repository.
+
+## Demo
+
+- Video walkthrough (≤ 3 min, running on localhost): _add video link_
+- Live demo: _add Hugging Face Space link, or delete this line if not deployed_
+- Run locally: see Quick start above.
