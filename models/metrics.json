@@ -1,0 +1,399 @@
+{
+  "generated_at": "2026-11-21T10:31:38+00:00",
+  "split": {
+    "train": "2017-2022",
+    "validation": "2023",
+    "test": "2024-2025",
+    "rule": "split by year of the target week; never shuffled"
+  },
+  "horizons": {
+    "2": {
+      "tier_thresholds_cases": [
+        1.0,
+        5.0,
+        13.0
+      ],
+      "validation_comparison": {
+        "Baseline: persistence (cases now)": {
+          "MAE": 2.429,
+          "RMSE": 4.746,
+          "tier_macro_F1": 0.496,
+          "high_risk_recall": 0.725
+        },
+        "Baseline: same week last year": {
+          "MAE": 2.122,
+          "RMSE": 4.2,
+          "tier_macro_F1": 0.51,
+          "high_risk_recall": 0.851
+        },
+        "Poisson GLM (statistical)": {
+          "MAE": 1.29,
+          "RMSE": 2.639,
+          "tier_macro_F1": 0.661,
+          "high_risk_recall": 0.832
+        },
+        "Random Forest": {
+          "MAE": 1.237,
+          "RMSE": 2.466,
+          "tier_macro_F1": 0.648,
+          "high_risk_recall": 0.927
+        },
+        "XGBoost (Poisson)": {
+          "MAE": 1.214,
+          "RMSE": 2.508,
+          "tier_macro_F1": 0.656,
+          "high_risk_recall": 0.882
+        },
+        "LightGBM (Poisson)  <- deployed": {
+          "MAE": 1.205,
+          "RMSE": 2.443,
+          "tier_macro_F1": 0.66,
+          "high_risk_recall": 0.886
+        }
+      },
+      "deployed_model": "LightGBM (Poisson objective)",
+      "n_trees": 361,
+      "test": {
+        "MAE": 0.995,
+        "RMSE": 1.989,
+        "tier_macro_F1": 0.604,
+        "high_risk_recall": 0.871
+      },
+      "test_with_case_history": {
+        "MAE": 0.995,
+        "RMSE": 1.992,
+        "tier_macro_F1": 0.607,
+        "high_risk_recall": 0.869
+      },
+      "deployed_uses_case_history": false,
+      "test_interval_coverage_80": 0.767,
+      "backtest_by_year": [
+        {
+          "year": 2019,
+          "MAE": 1.367,
+          "RMSE": 2.837,
+          "tier_macro_F1": 0.576,
+          "high_risk_recall": 0.804
+        },
+        {
+          "year": 2020,
+          "MAE": 1.12,
+          "RMSE": 2.164,
+          "tier_macro_F1": 0.595,
+          "high_risk_recall": 0.766
+        },
+        {
+          "year": 2021,
+          "MAE": 1.011,
+          "RMSE": 1.97,
+          "tier_macro_F1": 0.535,
+          "high_risk_recall": 0.702
+        },
+        {
+          "year": 2022,
+          "MAE": 1.231,
+          "RMSE": 2.452,
+          "tier_macro_F1": 0.592,
+          "high_risk_recall": 0.889
+        },
+        {
+          "year": 2023,
+          "MAE": 1.204,
+          "RMSE": 2.447,
+          "tier_macro_F1": 0.661,
+          "high_risk_recall": 0.885
+        },
+        {
+          "year": 2024,
+          "MAE": 0.918,
+          "RMSE": 1.802,
+          "tier_macro_F1": 0.615,
+          "high_risk_recall": 0.784
+        },
+        {
+          "year": 2025,
+          "MAE": 1.061,
+          "RMSE": 2.126,
+          "tier_macro_F1": 0.586,
+          "high_risk_recall": 0.932
+        }
+      ],
+      "top_features_gain_share": {
+        "humidity_mean_4w": 0.4179,
+        "rain_sum_2w": 0.2759,
+        "rain_sum_4w": 0.0838,
+        "rain4w_x_waterlogging": 0.0571,
+        "humidity_lag_0w": 0.0321,
+        "target_week_cos": 0.024,
+        "rain_lag_1w": 0.02,
+        "temp_mean_4w": 0.0193,
+        "population_density_sqkm": 0.0086,
+        "rain_sum_8w": 0.0071,
+        "rain4w_x_poor_sanitation": 0.0068,
+        "rain_lag_2w": 0.0059,
+        "rain_lag_0w": 0.0048,
+        "temp_range_lag_0w": 0.004,
+        "rain_lag_3w": 0.0035
+      }
+    },
+    "3": {
+      "tier_thresholds_cases": [
+        1.0,
+        5.0,
+        13.0
+      ],
+      "validation_comparison": {
+        "Baseline: persistence (cases now)": {
+          "MAE": 2.694,
+          "RMSE": 5.25,
+          "tier_macro_F1": 0.467,
+          "high_risk_recall": 0.687
+        },
+        "Baseline: same week last year": {
+          "MAE": 2.122,
+          "RMSE": 4.2,
+          "tier_macro_F1": 0.51,
+          "high_risk_recall": 0.851
+        },
+        "Poisson GLM (statistical)": {
+          "MAE": 1.385,
+          "RMSE": 2.932,
+          "tier_macro_F1": 0.67,
+          "high_risk_recall": 0.854
+        },
+        "Random Forest": {
+          "MAE": 1.221,
+          "RMSE": 2.405,
+          "tier_macro_F1": 0.656,
+          "high_risk_recall": 0.901
+        },
+        "XGBoost (Poisson)": {
+          "MAE": 1.16,
+          "RMSE": 2.409,
+          "tier_macro_F1": 0.665,
+          "high_risk_recall": 0.886
+        },
+        "LightGBM (Poisson)  <- deployed": {
+          "MAE": 1.152,
+          "RMSE": 2.365,
+          "tier_macro_F1": 0.669,
+          "high_risk_recall": 0.897
+        }
+      },
+      "deployed_model": "LightGBM (Poisson objective)",
+      "n_trees": 420,
+      "test": {
+        "MAE": 1.019,
+        "RMSE": 2.008,
+        "tier_macro_F1": 0.602,
+        "high_risk_recall": 0.842
+      },
+      "test_with_case_history": {
+        "MAE": 1.015,
+        "RMSE": 2.003,
+        "tier_macro_F1": 0.606,
+        "high_risk_recall": 0.846
+      },
+      "deployed_uses_case_history": false,
+      "test_interval_coverage_80": 0.727,
+      "backtest_by_year": [
+        {
+          "year": 2019,
+          "MAE": 1.57,
+          "RMSE": 3.194,
+          "tier_macro_F1": 0.521,
+          "high_risk_recall": 0.717
+        },
+        {
+          "year": 2020,
+          "MAE": 1.059,
+          "RMSE": 2.032,
+          "tier_macro_F1": 0.638,
+          "high_risk_recall": 0.796
+        },
+        {
+          "year": 2021,
+          "MAE": 1.022,
+          "RMSE": 1.957,
+          "tier_macro_F1": 0.537,
+          "high_risk_recall": 0.81
+        },
+        {
+          "year": 2022,
+          "MAE": 1.386,
+          "RMSE": 2.883,
+          "tier_macro_F1": 0.531,
+          "high_risk_recall": 0.835
+        },
+        {
+          "year": 2023,
+          "MAE": 1.152,
+          "RMSE": 2.373,
+          "tier_macro_F1": 0.669,
+          "high_risk_recall": 0.894
+        },
+        {
+          "year": 2024,
+          "MAE": 0.903,
+          "RMSE": 1.756,
+          "tier_macro_F1": 0.647,
+          "high_risk_recall": 0.761
+        },
+        {
+          "year": 2025,
+          "MAE": 1.13,
+          "RMSE": 2.22,
+          "tier_macro_F1": 0.545,
+          "high_risk_recall": 0.918
+        }
+      ],
+      "top_features_gain_share": {
+        "rain_sum_2w": 0.5637,
+        "rain_lag_0w": 0.1792,
+        "target_week_cos": 0.0637,
+        "rain4w_x_waterlogging": 0.0414,
+        "temp_mean_4w": 0.0312,
+        "temp_mean_8w": 0.0183,
+        "humidity_mean_4w": 0.0132,
+        "target_week_sin": 0.0095,
+        "population_density_sqkm": 0.0094,
+        "rain_sum_8w": 0.0077,
+        "temp_lag_0w": 0.0069,
+        "temp_range_lag_0w": 0.0046,
+        "rain_lag_3w": 0.0041,
+        "humidity_mean_8w": 0.0039,
+        "water_logging_risk_index": 0.0036
+      }
+    },
+    "4": {
+      "tier_thresholds_cases": [
+        1.0,
+        5.0,
+        13.0
+      ],
+      "validation_comparison": {
+        "Baseline: persistence (cases now)": {
+          "MAE": 2.734,
+          "RMSE": 5.235,
+          "tier_macro_F1": 0.46,
+          "high_risk_recall": 0.649
+        },
+        "Baseline: same week last year": {
+          "MAE": 2.122,
+          "RMSE": 4.2,
+          "tier_macro_F1": 0.51,
+          "high_risk_recall": 0.851
+        },
+        "Poisson GLM (statistical)": {
+          "MAE": 1.65,
+          "RMSE": 3.231,
+          "tier_macro_F1": 0.596,
+          "high_risk_recall": 0.834
+        },
+        "Random Forest": {
+          "MAE": 1.579,
+          "RMSE": 3.113,
+          "tier_macro_F1": 0.555,
+          "high_risk_recall": 0.891
+        },
+        "XGBoost (Poisson)": {
+          "MAE": 1.53,
+          "RMSE": 3.115,
+          "tier_macro_F1": 0.564,
+          "high_risk_recall": 0.829
+        },
+        "LightGBM (Poisson)  <- deployed": {
+          "MAE": 1.542,
+          "RMSE": 3.131,
+          "tier_macro_F1": 0.563,
+          "high_risk_recall": 0.844
+        }
+      },
+      "deployed_model": "LightGBM (Poisson objective)",
+      "n_trees": 422,
+      "test": {
+        "MAE": 1.161,
+        "RMSE": 2.282,
+        "tier_macro_F1": 0.551,
+        "high_risk_recall": 0.859
+      },
+      "test_with_case_history": {
+        "MAE": 1.154,
+        "RMSE": 2.255,
+        "tier_macro_F1": 0.546,
+        "high_risk_recall": 0.873
+      },
+      "deployed_uses_case_history": false,
+      "test_interval_coverage_80": 0.721,
+      "backtest_by_year": [
+        {
+          "year": 2019,
+          "MAE": 1.723,
+          "RMSE": 3.587,
+          "tier_macro_F1": 0.477,
+          "high_risk_recall": 0.716
+        },
+        {
+          "year": 2020,
+          "MAE": 1.118,
+          "RMSE": 2.176,
+          "tier_macro_F1": 0.516,
+          "high_risk_recall": 0.867
+        },
+        {
+          "year": 2021,
+          "MAE": 1.154,
+          "RMSE": 2.188,
+          "tier_macro_F1": 0.494,
+          "high_risk_recall": 0.788
+        },
+        {
+          "year": 2022,
+          "MAE": 1.655,
+          "RMSE": 3.447,
+          "tier_macro_F1": 0.51,
+          "high_risk_recall": 0.78
+        },
+        {
+          "year": 2023,
+          "MAE": 1.54,
+          "RMSE": 3.133,
+          "tier_macro_F1": 0.562,
+          "high_risk_recall": 0.842
+        },
+        {
+          "year": 2024,
+          "MAE": 1.105,
+          "RMSE": 2.168,
+          "tier_macro_F1": 0.566,
+          "high_risk_recall": 0.822
+        },
+        {
+          "year": 2025,
+          "MAE": 1.221,
+          "RMSE": 2.379,
+          "tier_macro_F1": 0.531,
+          "high_risk_recall": 0.898
+        }
+      ],
+      "top_features_gain_share": {
+        "temp_mean_8w": 0.5487,
+        "temp_lag_4w": 0.1213,
+        "temp_mean_4w": 0.0541,
+        "target_week_cos": 0.0532,
+        "rain4w_x_waterlogging": 0.0395,
+        "rain_sum_4w": 0.0274,
+        "target_week_sin": 0.0256,
+        "rain_lag_0w": 0.0139,
+        "temp_range_lag_0w": 0.0111,
+        "temp_lag_1w": 0.0098,
+        "population_density_sqkm": 0.0085,
+        "water_logging_risk_index": 0.0083,
+        "temp_lag_3w": 0.0072,
+        "temp_lag_0w": 0.0059,
+        "rain_lag_2w": 0.0049
+      }
+    }
+  },
+  "train_seconds": 175.8
+}
