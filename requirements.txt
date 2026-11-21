@@ -1,0 +1,8 @@
+# Runtime + training (Python 3.10 - 3.13)
+streamlit>=1.50,<2
+pandas>=2.2
+numpy>=1.26
+scikit-learn>=1.5
+lightgbm>=4.5,<5
+plotly>=5.24
+joblib>=1.4
