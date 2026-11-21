@@ -128,6 +128,6 @@ tests/test_api.py          API tests: every endpoint, city, horizon, date edge a
 
 ## Demo
 
-- Video walkthrough (≤ 3 min, running on localhost): _add video link_
-- Live demo: _add Hugging Face Space link, or delete this line if not deployed_
+- Video walkthrough (≤ 3 min, running on localhost): https://youtu.be/XYZo31OLgIU?si=c5v2DkbcPSqrxSiO
+- Live demo: https://dengue-watch.onrender.com (free tier, so the first load may take about a minute)
 - Run locally: see Quick start above.
