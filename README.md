@@ -1,4 +1,4 @@
-# 💧 Dengue Watch: Urban Dengue Early-Warning System
+# 🦟 Dengue Watch: Urban Dengue Early-Warning System
 
 **EDU AI Engineering Hackathon 2026 — Phase 1: AI for Urban Dengue Outbreak**
 
