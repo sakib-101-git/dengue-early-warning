@@ -277,6 +277,32 @@ def test_method_page_defaults_by_scope_and_can_be_switched(client):
     assert notice(client, scope="ward", id="DNCC_Ward_01", method=1).json()["context"] == ward["context"]
 
 
+def test_brief_describes_the_model_inputs_correctly(client):
+    """The deployed model uses weather, ward conditions and season only (no case counts as input)."""
+    foot = "Forecast from weather and ward conditions, using a model trained on 2017–2023 case records."
+    for kw in (dict(scope="city", id="Dhaka North"), dict(scope="ward", id="DNCC_Ward_01"),
+               dict(scope="ward", id="DNCC_Ward_01", method=1)):
+        brief = notice(client, **kw).json()["brief"]
+        assert foot + " Numbers are estimates" in brief and "past case data" not in brief
+    method = notice(client, scope="city", id="Dhaka North").json()["brief"]
+    assert "trained on 2017 to 2023 case records" in method and "does not use recent\ncase counts" in method
+
+
+def test_breeding_site_checks_start_this_week(client):
+    seen = 0
+    for w in wards(client)[:30]:
+        ctx = notice(client, scope="ward", id=w, **SCARCE).json()["context"]
+        by = dispatch.day(ctx["deadline"], False)
+        for a in ctx["actions"]:
+            if "breeding sites" in a["text"]:
+                seen += 1
+                assert a["text"].endswith("this week.") and f"by {by}" not in a["text"], a["text"]
+                assert a["sms"] == "Start door-to-door checks this week."
+            elif a["key"] in ("top_up", "crews", "transfer_out"):
+                assert a["text"].endswith(f"by {by}."), a["text"]           # other actions keep their deadline
+    assert seen
+
+
 @pytest.mark.parametrize("ident", ["DNCC_Ward_01", "DSCC_Ward_06", "CCC_Ward_07", "GCC_Ward_02", "NCC_Ward_05"])
 def test_human_text_has_no_internal_terms(client, ident):
     d = notice(client, scope="ward", id=ident, pool="all", plan="allocation", method=1, **SCARCE).json()

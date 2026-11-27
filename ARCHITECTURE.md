@@ -33,7 +33,8 @@ flowchart TB
   deployed models and writes the `.joblib` and `metrics.json` files. This takes about 3 minutes on
   a laptop CPU.
 - **Online (every request):** `python -m server` loads the saved models once. The browser calls the
-  JSON API: `/api/meta`, `/api/ward`, `/api/city`, `/api/heatmap`, `/api/model` and `/api/health`.
+  JSON API: `/api/meta`, `/api/ward`, `/api/city`, `/api/heatmap`, `/api/model` and `/api/health`,
+  plus the Phase 2 endpoints in section 7.
 - An alternative Streamlit UI (`app/`) uses the same `RiskEngine`.
 
 ## 2. Forecast framing and lag features
@@ -140,8 +141,10 @@ achievable limit. One global model also forecasts new wards without retraining.
 - **Caching.**
   - The `RiskEngine` and all forecast tables (60 wards × every week × 3 horizons) are built once
     at startup.
-  - API responses are computed from in-memory tables.
-  - The browser keeps a small response cache.
+  - API responses are computed from in-memory tables and kept in bounded LRU caches (about 45 MB
+    when all are full, see 7.5).
+  - The browser keeps a small response cache. The app's own JS/CSS/HTML are revalidated on every
+    load (`Cache-Control: no-cache` + ETag), so a deploy is never hidden behind a stale module.
 - **Latency.**
   - Cold start: about 1.5 s.
   - Warm API calls: 1–3 ms.
@@ -176,6 +179,46 @@ file, plus `saline_bags_needed`, `diagnostic_kits_needed` and `hospital_beds_req
 `tests/test_data.py` checks that the base columns are identical. So the features, models and
 forecasts do not change, and no retraining is needed. `config.RAW_CSV` uses the onsite file when it
 exists and falls back to `dengue.csv`.
+
+**Overview.** Every module is deterministic Python over the forecast tables built at startup. Nothing
+on this path trains a model, calls an external API or LLM, or needs the internet.
+
+```mermaid
+flowchart LR
+    subgraph Startup [Startup: once, from local files only]
+      RAW[(data/raw/dengue_onsite.csv)] --> ENG[RiskEngine<br/>forecast tables h = 2, 3, 4<br/>expected + q10/q90]
+      MOD[(models/model_h2/3/4.joblib)] --> ENG
+      RAW --> RATES[(models/resource_rates.json<br/>k per supply, fit on ≤ 2022)]
+      RAW --> CAP[Bed capacity per ward<br/>max 2, ceil P95 ≤ 2022]
+      RAW --> PROF[Ward profiles<br/>density weight, top-25% density]
+    end
+
+    ENG --> ALLOC[7.1 Resources<br/>units = round k × cases<br/>priority + greedy stock fill + crews]
+    RATES --> ALLOC
+    PROF --> ALLOC
+    ENG --> HOSP[7.2 Hospitals<br/>bed demand vs capacity<br/>greedy same-city routing]
+    RATES --> HOSP
+    CAP --> HOSP
+    ENG --> SIM[7.3 Simulator<br/>crews cut water-logging index<br/>LightGBM re-run h2-h4, ROI, auto-deploy]
+    MOD --> SIM
+    ALLOC --> DSP[7.4 Dispatch<br/>fixed templates:<br/>SMS · WhatsApp · A4 brief]
+    HOSP --> DSP
+    SIM --> DSP
+
+    ALLOC & HOSP & SIM & DSP --> API[server/api.py<br/>/api/allocation · /api/overflow<br/>/api/simulate · /api/simulate/rank<br/>/api/dispatch · /api/health<br/>bounded LRU caches]
+    API --> UI[web/: Resources · Hospitals<br/>Simulator · Dispatch views<br/>vendored ECharts + fonts, status chip]
+    DSP --> EXP[(exports/<br/>python -m src.export_samples)]
+    UI --> USER((Health officer /<br/>commissioner))
+```
+
+Each module answers one question, and each one's output is the next one's input:
+- **7.1 Resources:** who gets the scarce supplies and crews this week?
+- **7.2 Hospitals:** where do the beds run out, and where can the overflow go?
+- **7.3 Simulator:** where would crews prevent the most cases?
+- **7.4 Dispatch:** what do we tell each ward?
+- **7.5 Offline resilience:** all of the above keeps working with the network unplugged.
+
+The assumptions and limits of every module are collected in 7.6.
 
 ### 7.1 Constrained resource allocation (`src/resources.py`, `GET /api/allocation`)
 
@@ -355,6 +398,11 @@ human-facing text follows fixed writing rules. The JSON context keeps every engi
   test kits and 3 extra beds from the regional store by 21 Jul". WhatsApp shows the same actions
   with their amounts, without the deadline, which is in its section title. Deadline = the Monday
   before the forecast week, but never sooner than 3 days after the data date (`dispatch.deadline`).
+  The one exception is the door-to-door check for breeding sites, which is cheap and urgent, so it
+  says "Start ... this week" instead of a deadline.
+- The footer and method page describe the model correctly: "Forecast from weather and ward
+  conditions, using a model trained on 2017–2023 case records." Case counts are what the model was
+  trained on, never an input (`USE_CASE_HISTORY = False`, see section 4).
 - Every ward and city context carries `summary` (the "In short" text), `reasons`, `bed_story`,
   `deadline` and actions as `{key, text, sms, chat}`, so the UI shows exactly what was sent.
 
@@ -413,3 +461,106 @@ keep only letters, digits, `-` and `_`, so they are safe on Windows.
 logo never wraps; when the tabs overflow, the strip scrolls sideways with an edge fade on the side
 that hides more tabs, and the active tab is scrolled into view (`fitNav` in `web/js/app.js`). At
 full width it looks as before.
+
+### 7.5 Offline resilience and deterministic fallback
+
+**Nothing at runtime needs the internet.** Forecasting, allocation, routing, simulation and dispatch
+read only local files (data CSV, `models/*.joblib`, `models/resource_rates.json`) and run in-process.
+There is no LLM, external API, CDN, web-font service or analytics. An audit of `web/`, `server/` and
+`src/` found one runtime network dependency, the Google Fonts stylesheet in `index.html`. It is gone:
+the Geist and Geist Mono variable fonts (SIL OFL 1.1, licence included) are vendored in
+`web/vendor/fonts/` next to `web/vendor/echarts.min.js` and loaded with `@font-face` and
+`font-display: swap`. If they ever fail, the system font stacks take over and the layout does not
+change. The only other runtime request in the codebase is the `python -m server` launcher's
+readiness ping to its own `127.0.0.1`.
+
+**`GET /api/health`** stays a plain 200 for uptime monitors (UptimeRobot pings `/` or this
+endpoint) and now reports readiness:
+- `offline_ready: true` when every component loaded from local files: `models` (all three
+  horizons), `data` (60 wards), `forecast_tables`, `supply_rates`, `bed_capacity`, `web_assets`
+  (index, styles, app.js, ECharts, both fonts) and `dispatch_templates`;
+- `components` (one flag each), `data_file`, `assets` and `versions` (Python, numpy, pandas,
+  scikit-learn, lightgbm, fastapi, uvicorn).
+
+**Status chip.** The header shows a small chip (`web/js/net.js`). It combines `navigator.onLine`
+with a `/api/health` ping: every 30 s, on `online`/`offline` events, and when the tab becomes
+visible again. Its states:
+- **Offline-ready** (green dot) when the server answers with `offline_ready`;
+- the same label with a hollow dot when the browser has no internet but the server is reachable
+  (a local server keeps working fully);
+- **Degraded** (amber), listing what did not load;
+- **Server unreachable** (red).
+
+Below 1,280 px only the dot shows, so the chip never crowds the nav; the label stays in the tooltip
+and the accessible name.
+
+**Kill-switch test.** `tests/test_offline.py` simulates Wi-Fi off. It patches
+`socket.socket.connect`, `connect_ex` and `socket.getaddrinfo` to refuse any host that is not this
+machine, and records every attempt so that a swallowed error still fails the test. Under the block
+it rebuilds the server state from scratch and clears every response cache, then checks:
+- `/api/health` reports `offline_ready`;
+- meta, ward, city and model all answer, as do allocation (two scarcity settings), overflow,
+  simulate (GET plan, GET auto-deploy and POST) and simulate/rank;
+- dispatch answers as SMS, WhatsApp, brief and JSON, for both a ward and a city;
+- every HTML/JS/CSS/SVG/font file under `web/` is served byte for byte.
+
+Static guards check that no UI source references an external URL or `@import`, that the vendored
+ECharts makes no requests, and that no module in `src/` or `server/api.py` imports a network client.
+A headless-Chrome check over all 7 views × 7 widths × light/dark recorded **zero** non-local
+requests.
+
+**Caching that never serves stale code.** The app's own files (`index.html`, `styles.css`, `js/*`)
+change with every deploy and are ES modules that import each other. A browser that heuristically
+cached one module could mix old and new code until a hard refresh. They are now served with
+`Cache-Control: no-cache` plus `ETag`/`Last-Modified`, so the browser revalidates on every load and
+gets a cheap `304` when nothing changed. Vendored files (`vendor/`) only change when the vendored
+version is bumped and stay cacheable (`public, max-age=604800`). Fonts are served as `font/woff2`.
+Tests check the headers and the `304` revalidation.
+
+**Memory (Render free tier: 512 MB).** Every response cache in `server/api.py` is a bounded LRU,
+sized in one table (`CACHE`), and a test checks that none is unbounded or larger than 128 entries.
+Measured retained size per entry (tracemalloc):
+
+| Cache | Entry size | Max entries | Full |
+|---|---|---|---|
+| ward | 40 KB | 128 | 5 MB |
+| city | 9 KB | 128 | 1 MB |
+| heatmap | 106 KB | 64 | 7 MB |
+| allocation | 124 KB | 64 | 8 MB |
+| overflow | 74 KB | 64 | 5 MB |
+| simulator curves (with the all-ward ranking) | 386 KB | 16 | 6 MB |
+| simulate | 87 KB | 64 | 6 MB |
+| rank (per city) | 19 KB | 64 | 1 MB |
+| dispatch | 79 KB | 64 | 5 MB |
+
+All caches full add at most about 45 MB (the previous sizes allowed about 145 MB). Every entry
+except the simulator curves (about 0.5 s) is recomputed in milliseconds.
+
+Peak memory was measured with every endpoint warmed until every cache was full, on Windows,
+in-process:
+- all 5 cities and "all";
+- 24 issue weeks across 2024–25 and all 3 horizons;
+- allocation at 30/60/100% stock;
+- overflow at 50/100/200% capacity, both demand bases;
+- simulator rank for all scopes at effects of 5/10/20%, with auto-deploy of 10 and 40 crews;
+- dispatch city briefs for every city and week, and SMS/WhatsApp/brief for all 60 wards.
+
+The results:
+- The working-set peak is **307 MB**, reached while the forecast tables are built at startup, and
+  warming does not raise it.
+- After warming, the working set settles at about 230 MB.
+- Private memory grows by 32 MB with all caches full, down from 92 MB with the previous cache sizes.
+
+On Render the app was observed at about 330 MB, so the bounded caches keep the worst case at about
+375 MB, under the 420 MB target. Re-measure on Linux with the server's VmHWM after deploying.
+
+### 7.6 Assumptions and limitations, by module
+
+| Module | Assumptions | Limitations |
+|---|---|---|
+| Forecast (unchanged) | Weather, ward conditions and season predict cases 2–4 weeks ahead. Trained on 2017–2023 case records; case counts are not an input. | MAE about 1 case per ward-week (2024–25 test). The 80% range covers about 8 in 10 outcomes, so 1 in 5 weeks falls outside it. |
+| 7.1 Resources | Supply need is proportional to cases (k fitted on ≤ 2022, R² ≥ 0.97 on 2024–25). Regional stock is a % of total need in scope. Crew needs per tier (0/1/2/3, +1 for top-25% density) are a planning rule, not data. | The greedy fill is a transparent priority rule, not a global optimum. There are no per-ward stock levels, delivery times or transport costs. Stock is pooled within the chosen scope. |
+| 7.2 Hospitals | No capacity column exists: each ward's capacity is assumed to be max(2, ceil(P95 of its weekly bed need, ≤ 2022)), scaled 50–200%. Bed demand = round(k_beds × cases), expected or q90. | There are no coordinates, so routing uses headroom and burden, not distance or travel time. It is one-week static routing: no length of stay, so beds do not carry over between weeks. Critical wards never receive. Routing never crosses cities, even when a neighbour city has room. |
+| 7.3 Simulator | A crew cuts the ward's water-logging index by e per crew (default 10%, 5–20%, capped at 50%). The effect flows only through the model's water-logging features. | This is a model counterfactual, not a field trial: the data has no intervention history, so e is an assumption. Tree models are stepwise, so small crew counts can show no change; a monotone guard stops more crews from ever raising a forecast. There are no spill-over effects between wards. |
+| 7.4 Dispatch | Fixed English templates over the engines' numbers. The deadline is the Monday before the forecast week. | Nothing is sent: notices are generated for copy, download and print, with no SMS or WhatsApp gateway. The text is English only. The SMS budget assumes GSM-7 (non-GSM characters are transliterated). |
+| 7.5 Offline | All inputs are local files, and the browser loads the UI from the same server. | Offline means the *server* needs no internet. A browser that cannot reach the server (for example the hosted URL with the laptop's Wi-Fi off) shows **Server unreachable**, so the kill-switch demo runs the server locally. The Render free tier sleeps when idle, so the first load can take about a minute. |

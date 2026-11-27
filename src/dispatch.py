@@ -326,8 +326,9 @@ def ward_actions(c: dict) -> list[dict]:
         acts.append(_act(40, "tier", f"Open a fever corner and start daily larviciding{with_crews} by {by}.",
                          f"Open a fever corner by {by}.", by=by))
     elif tier == "High":
-        acts.append(_act(45, "tier", f"Start door-to-door checks for mosquito breeding sites{with_crews} by {by}.",
-                         f"Start door-to-door checks by {by}.", by=by))
+        # breeding-site checks are urgent and cheap: start now, not by the resupply deadline
+        acts.append(_act(45, "tier", f"Start door-to-door checks for mosquito breeding sites{with_crews} this week.",
+                         "Start door-to-door checks this week.", by=by))
     gap = c["crews_needed"] - crews
     if gap > 0:
         acts.append(_act(50, "crews", f"Ask the city for {plural(gap, 'spraying crew')} by {by}.",
@@ -504,8 +505,8 @@ def city_actions(c: dict) -> list[dict]:
                          f"Top up {plural(len(warn), 'ward')} by {by}.", by=by))
     hot = [w for w in c["wards"] if TIER_ORDER[w["tier"]] >= 2]
     if hot:
-        acts.append(_act(60, "tier", f"Start daily larviciding and door-to-door checks in the {plural(len(hot), 'high-risk ward')} by {by}.",
-                         f"Start larviciding by {by}.", by=by))
+        acts.append(_act(60, "tier", f"Start daily larviciding and door-to-door checks in the {plural(len(hot), 'high-risk ward')} this week.",
+                         "Start larviciding this week.", by=by))
     if not acts:
         acts.append(_act(90, "routine", "Keep routine checks and weekly larviciding; no shortfalls this week.",
                          "Keep routine checks.", "Keep routine checks and weekly larviciding."))
@@ -822,10 +823,14 @@ def _todo(actions: list[dict]) -> str:
     return '<ul class="todo">' + "".join(f"<li><span>{_e(a['text'])}</span></li>" for a in actions[:3]) + "</ul>"
 
 
+# The deployed model uses weather, ward conditions and season only (config.USE_CASE_HISTORY = False);
+# the case records are what it was trained on, not an input.
+FOOTER = "Forecast from weather and ward conditions, using a model trained on 2017–2023 case records."
+
+
 def _sign_and_foot(c: dict, gen: str) -> str:
     return ('<div class="spacer"></div><div class="sign"><div>Prepared by</div><div>Approved by</div><div>Date</div></div>'
-            '<div class="foot"><span>Forecast from weather and past case data by Dengue Watch. Numbers are estimates; '
-            'see page 2 for method.</span>'
+            f'<div class="foot"><span>{FOOTER} Numbers are estimates; see page 2 for method.</span>'
             f'<span class="num">Generated {gen} from data up to {day(c["issue_date"])}</span></div>')
 
 
@@ -967,8 +972,9 @@ def _method_page(c: dict, gen: str) -> str:
     return f"""<section class="page method">{_top("Dengue Watch · page 2", "How these numbers were made", c, "")}
 <h2>The forecast</h2>
 <p>Dengue Watch predicts how many dengue cases each ward will have {c['horizon']} weeks ahead. It uses recent rainfall,
-temperature and humidity, each ward's drainage, crowding and sanitation, and the time of year. It learned from 2017 to
-2022 and was checked on 2024 and 2025, where it was usually within about 1 case per ward per week. The "likely" range
+temperature and humidity, each ward's drainage, crowding and sanitation, and the time of year. It does not use recent
+case counts, so it keeps working when case reports arrive late. The model was trained on 2017 to 2023 case records and
+checked on 2024 and 2025, where it was usually within about 1 case per ward per week. The "likely" range
 covers about 8 in 10 outcomes. This brief uses data up to {day(c['issue_date'])}.</p>
 <h2>Supplies and stock</h2>
 <p>Supply needs come straight from the expected cases.{rates} This brief assumes the regional store holds
