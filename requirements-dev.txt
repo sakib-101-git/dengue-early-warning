@@ -1,6 +1,4 @@
-# Extras for tests and the full model-comparison table (not needed to run the app)
+# Extras for the full model-comparison table (python -m src.experiments); not needed to run or test the app
 -r requirements.txt
-pytest>=8
-httpx>=0.27              # FastAPI TestClient (tests/test_api.py)
 xgboost>=2.1
 optuna>=4

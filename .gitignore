@@ -8,3 +8,12 @@ venv/
 .DS_Store
 *.log
 .ruff_cache/
+env/
+.mypy_cache/
+.coverage
+htmlcov/
+*.egg-info/
+build/
+dist/
+Thumbs.db
+.streamlit/secrets.toml

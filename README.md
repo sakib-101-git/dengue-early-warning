@@ -37,8 +37,8 @@ streamlit run app/streamlit_app.py
 **Optional:**
 
 ```bash
-pip install -r requirements-dev.txt   # pytest, xgboost, optuna
-python -m pytest -q                   # lag-pipeline tests + API tests
+python -m pytest -q                   # full test suite (pytest + httpx are in requirements.txt)
+pip install -r requirements-dev.txt   # xgboost, optuna: only for src.experiments
 python -m src.train                   # retrain + regenerate models/metrics.json (~3 min)
 python -m src.experiments             # ensembles, tuning, neural net vs. deployed model (~3 min)
 ```
@@ -47,14 +47,15 @@ python -m src.experiments             # ensembles, tuning, neural net vs. deploy
 
 A custom web app (FastAPI JSON API + hand-written HTML/CSS/JS with ECharts, light and dark themes).
 Seven views, switched from the top bar: three forecast views (below) and four Phase 2 operations views
-(next section). Every view's settings live in the URL, so links are shareable:
+(next section). Every view's settings live in the URL, so links are shareable. The **?** button in the
+header says what each tab is for, and ⓘ icons explain how a number is made:
 
 - **Ward**
   - A rain-to-risk hero: the last 12 weeks of rain hanging from a sky line, the breeding window highlighted, the weeks still ahead, and the forecast week coloured by risk.
   - Expected cases with a likely range, and what actually happened.
   - The factors pushing risk up or down (TreeSHAP).
   - The season's forecast vs. recorded cases.
-  - **Simulate weather:** change recent rain, temperature or humidity and see the forecast update instantly.
+  - **What if? → Change weather:** change recent rain, temperature or humidity and see the forecast update instantly.
 - **City:** how many wards need action, a ranked list of where to send teams first (click a ward to open it), and a ward × week risk heatmap for the year.
 - **Model:**
   - Test accuracy in plain numbers.
@@ -69,32 +70,32 @@ notice is the same number the Resources, Hospitals and Simulator views show. Des
 assumptions: [ARCHITECTURE.md §7](ARCHITECTURE.md#7-phase-2-operational-command-system).
 
 1. **Resources: constrained resource allocation** (`src/resources.py`, `/api/allocation`)
-   - Turns each ward's forecast into saline bags, diagnostic kits and hospital beds. Each uses a per-case rate learned from the onsite data.
-   - Scarcity controls: an **Available Regional Stock** slider (30–100%), **Total spraying crews**, and an optional 20% minimum-coverage floor. Scope is one city or all 60 wards.
+   - Turns each ward's forecast into saline bags, diagnostic kits ("Test kits" on screen) and hospital beds ("Extra beds", the surge stock). Each uses a per-case rate learned from the onsite data.
+   - Scarcity controls (card **Stock and crews**): an **Available regional stock** slider (30–100%), **Total spraying crews**, and **Minimum per ward** (Off / 20% each). Scope is one city or all 60 wards.
    - Wards are served in priority order. Critical wards are filled first, then the rest by expected cases × population-density weight.
-   - Headline cards show required vs. available per supply and the number of **critical supply deficits**.
-   - A ranked plan shows coverage bars, crews assigned vs. needed, and CRITICAL DEFICIT / WARNING badges.
+   - Headline cards show need vs. getting per supply and the number of **critical deficits** (High/Critical wards that cannot be fully supplied).
+   - **Plan by priority** shows *getting / need* coverage bars per supply, crews *assigned / need* (amber when short) and CRITICAL DEFICIT / WARNING badges.
 2. **Hospitals: surge and cross-ward overflow routing** (`src/hospitals.py`, `/api/overflow`)
-   - Projected bed demand per ward, for expected or surge (upper-forecast) demand, against an assumed capacity. Each ward's baseline is the P95 of its weekly bed need in training years. A **capacity scale** slider (50–200%) adjusts it.
+   - Projected bed demand per ward (**Plan beds for:** *A bad week* = upper forecast, or *A normal week* = expected) against an assumed number of **regular beds**. Each ward's baseline is the P95 of its weekly bed need in training years. A **Capacity** slider (50–200%) adjusts it.
    - Overflow is routed automatically to lower-burden wards **in the same city only**: largest deficit first, to the non-Critical ward with the most free beds.
-   - Shows city bed utilisation, overflow before routing, patients routed, **unresolved overflow** and remaining headroom.
-   - Per-ward demand-vs-capacity bars and a transfer list (from → to, patients).
+   - Shows **bed use** (utilisation), patients **over capacity**, patients **moved**, patients **still without a bed** (unresolved overflow) and the free beds left.
+   - **Bed use by city**, per-ward bars (**Beds by ward**) and a **Transfers** list (from → to, patients).
 3. **Simulator: what-if vector control** (`src/simulator.py`, `/api/simulate`, `/api/simulate/rank`)
    - Each larvicide/fogging crew cuts a ward's water-logging risk index (10% per crew by default, adjustable 5–20%, capped at 50%). The LightGBM models are re-run on the changed features for 2, 3 and 4 weeks ahead: a model counterfactual, not a fixed percentage.
-   - Per-ward crew steppers, or **auto-deploy N crews** by greedy marginal ROI.
-   - Shows cases prevented, bed-weeks freed, saline bags saved and **ROI (cases prevented per crew)**, plus a without-vs-with-crews chart for each forecast week and per-ward impact.
-   - An **intervention ROI ranking** of every ward by cases one crew prevents.
+   - Per-ward crew steppers, or **Place crews** to auto-deploy N crews by greedy marginal ROI.
+   - Shows cases prevented, bed-weeks freed, saline bags saved and **cases per crew** (the intervention ROI), plus a without-vs-with-crews chart for each forecast week and **Impact by ward** rows (risk change, crews, cases prevented; each row expands to every week).
+   - **Best wards for crews**: every ward ranked by cases one crew prevents (1-crew ROI).
 4. **Dispatch: multi-channel notices** (`src/dispatch.py`, `/api/dispatch`)
    - Ward or city notices as **SMS** (GSM-7, 1 segment for most wards and never more than 2, with a live character and segment counter), **WhatsApp** (a short chat message with *bold* section titles and a status dot) and a **printable A4 brief** (Print, then Save as PDF). A ward brief fits on one page; city briefs add a plain-language "How these numbers were made" page (a toggle switches it on or off).
    - Written for non-technical readers: whole numbers ("about 9 cases, likely 5 to 14"), need vs getting for saline, test kits and extra (surge) beds, the official CRITICAL DEFICIT / WARNING flag followed by what it means and *why* the ward is short (deficit-ward SMS start with `CRITICAL:` / `WARNING:`), one plain story comparing patients who may need a bed with the ward's regular beds and transfers, and at most 3 actions, each with an amount and a deadline (the Monday before the forecast week; door-to-door breeding-site checks say "this week"). It can also show the simulator's estimate of cases prevented by the assigned crews.
-   - Built from fixed templates over the same payloads as Resources, Hospitals and Simulator, so the numbers always match. There is no AI model or network call. Copy and download buttons are included.
+   - Built from fixed templates over the same payloads as Resources, Hospitals and Simulator, so the numbers always match. There is no AI model or network call. **Copy text**, **Download** and **Print brief** buttons, and a **Summary** beside the notice (flags, expected cases, act-by date, need / getting / short).
    - `python -m src.export_samples` writes sample notices, briefs, `allocation_plan.csv` and `overflow_routes.csv` to [`exports/`](exports/).
 5. **Offline resilience and deterministic fallback** (`/api/health`, `tests/test_offline.py`)
    - Forecasting, allocation, routing, simulation and dispatch read only local files (data, `models/`) and run in-process: no internet, external API, LLM, CDN, web-font service or analytics. ECharts and the Geist fonts are vendored in `web/vendor/`; if the fonts fail, system fonts take over.
    - `/api/health` reports `offline_ready: true` plus each component (models, data, forecast tables, supply rates, bed capacity, web assets, templates) and the library versions. `GET /` stays a plain 200 for uptime monitors.
    - A status chip in the header combines the browser's connection state with a health ping: **Offline-ready** (a hollow dot when the browser has no internet but the server is fine), **Degraded** or **Server unreachable**.
    - `tests/test_offline.py` blocks every non-local socket and DNS lookup, rebuilds the server from scratch and exercises every endpoint, every dispatch format and every UI file.
-   - The app's JS/CSS/HTML are served with `Cache-Control: no-cache` (ETag revalidation), so updates never need a hard refresh, and all server caches are bounded (about 45 MB when full; peak memory is in [ARCHITECTURE.md §7.5](ARCHITECTURE.md#75-offline-resilience-and-deterministic-fallback)).
+   - The page loads its CSS and JS modules by content-hashed URLs (`?v=…` plus an import map) and every app file is served with `Cache-Control: no-cache` (ETag revalidation), so an update never needs a hard refresh, even in a browser that cached an older build. All server caches are bounded (about 45 MB when full; peak memory is in [ARCHITECTURE.md §7.5](ARCHITECTURE.md#75-offline-resilience-and-deterministic-fallback)).
 
 ### How to run
 
@@ -118,14 +119,15 @@ Interactive API docs: `/api/docs`.
 
 The app opens on this week by default (forecast week 28 Jul 2025). The full click-by-click script,
 with the numbers to expect, is in [docs/DEMO.md](docs/DEMO.md). In short:
-1. **Resources**, all cities, 60% stock, 40 crews: 1,344 saline bags, 655 kits and 166 extra beds
-   needed; 806 / 393 / 99 available; **30 critical deficits**. At 100% stock there are none; at 30%
+1. **Resources**, all cities, 60% stock, 40 crews: 1,344 saline bags, 655 test kits and 166 extra beds
+   needed; getting 806 / 393 / 99; **30 critical deficits**. At 100% stock there are none; at 30%
    there are 47.
-2. **Hospitals**, surge demand: 232 patients for 224 regular beds (104%). Only 2 can be moved (in
-   Chattogram) and 8 stay unresolved. At 115% capacity, all 6 overflow patients are routed within
-   their own city.
-3. **Simulator**: the top 1-crew ROI is DSCC Ward 11 (4.5 cases per crew). **Auto-deploy 10** places
-   crews in 6 wards and prevents **41.1 cases** over 2–4 weeks (14 bed-weeks, 95 saline bags), ROI 4.1.
+2. **Hospitals**, planning for a bad week: 232 patients for 224 regular beds (104% bed use). Only 2
+   can be moved (in Chattogram) and 8 stay without a bed. At 115% capacity, all 6 overflow patients
+   are moved within their own city.
+3. **Simulator**: the best ward for one crew is DSCC Ward 11 (4.5 cases prevented). **Place crews**
+   with 10 puts crews in 6 wards and prevents **41 cases** over 2–4 weeks (14 bed-weeks, 95 saline
+   bags), 4.1 cases per crew.
 4. **Dispatch**, DNCC Ward 01: `CRITICAL: DNCC Ward 01 dengue, about 9 cases wk of 28 Jul (up to 14).
    Need 21 saline, 10 kits, 3 beds, none allocated yet. Resupply by 21 Jul. -Dengue Watch`
    (1 SMS segment), plus the WhatsApp version and a printable brief.
@@ -135,7 +137,7 @@ with the numbers to expect, is in [docs/DEMO.md](docs/DEMO.md). In short:
 ### What is in `exports/`
 
 Generated by `python -m src.export_samples` for the demo scenario: issue 2025-07-07, h = 3, 60% stock,
-40 crews, surge beds, 100% capacity, and the crew impact of the allocated crews. For each city it
+40 crews, beds planned for a bad week (surge), 100% capacity, and the crew impact of the allocated crews. For each city it
 covers the top 3 priority wards plus that city's first ward with a supply deficit.
 - `sms/*.txt`: one SMS per ward plus `city_<city>.txt` (GSM-7; 1 segment where possible, never
   more than 2).

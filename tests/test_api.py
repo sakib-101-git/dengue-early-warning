@@ -4,7 +4,7 @@ Run:  python -m pytest -q tests/test_api.py
 """
 import pytest
 
-pytest.importorskip("httpx")  # FastAPI's TestClient needs httpx (requirements-dev.txt)
+pytest.importorskip("httpx")  # FastAPI's TestClient needs httpx (requirements.txt)
 from fastapi.testclient import TestClient  # noqa: E402
 
 from server.api import app  # noqa: E402

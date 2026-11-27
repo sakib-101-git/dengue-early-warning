@@ -154,7 +154,7 @@ achievable limit. One global model also forecasts new wards without retraining.
 - **LLM and API cost: zero.** No LLM, no external weather API and no paid service at runtime, so
   there are no tokens to budget and no rate limits. Statistical and ML models only, so the system
   cannot hallucinate numbers.
-- **Light install.** The runtime needs 7 packages. A fresh `pip install -r requirements.txt` takes
+- **Light install.** The runtime needs 7 packages (pytest and httpx, also in `requirements.txt`, run the tests). A fresh `pip install -r requirements.txt` takes
   under a minute with a warm cache.
 
 ## 6. Resilience
