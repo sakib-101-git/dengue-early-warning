@@ -68,6 +68,11 @@ Three views, switched from the top bar; every view's settings live in the URL, s
   - Overflow is routed automatically to lower-burden wards **in the same city only**: largest deficit first, to the non-Critical ward with the most free beds.
   - Shows city bed utilisation, overflow before routing, patients routed, **unresolved overflow** and remaining headroom.
   - Per-ward demand-vs-capacity bars and a transfer list (from → to, patients).
+- **Simulator (what-if vector control):**
+  - Each larvicide/fogging crew cuts a ward's water-logging risk index (10% per crew by default, adjustable 5–20%, capped at 50%). The LightGBM models are re-run on the changed features for 2, 3 and 4 weeks ahead: a model counterfactual, not a fixed percentage.
+  - Per-ward crew steppers, or **auto-deploy N crews** by greedy marginal ROI.
+  - Shows cases prevented, bed-weeks freed, saline bags saved and **ROI (cases prevented per crew)**, plus a without-vs-with-crews chart for each forecast week and per-ward impact.
+  - An **intervention ROI ranking** of every ward by cases one crew prevents.
 
 ## Results (held-out test 2024–2025, never used for training or tuning)
 
@@ -98,6 +103,7 @@ src/predict.py             RiskEngine: forecasts, TreeSHAP drivers, what-if
 src/experiments.py         ensembles / tuning / neural-net comparison
 src/resources.py           supply rates, ward priority, scarce-stock greedy allocation, crews
 src/hospitals.py           assumed bed capacity, ward deficits, greedy intra-city overflow routing
+src/simulator.py           vector-control counterfactual: water-logging cut -> model re-run, ROI ranking, auto-deploy
 server/api.py              FastAPI JSON API over the RiskEngine + serves web/
 server/__main__.py         `python -m server` launcher (uvicorn, opens the browser)
 web/index.html             app shell (top bar, navigation, theme toggle)
@@ -111,6 +117,7 @@ tests/test_api.py          API tests: every endpoint, city, horizon, date edge a
 tests/test_data.py         onsite dataset = Phase 1 dataset + supply columns (forecasts unchanged)
 tests/test_resources.py    allocation: rates, priority, conservation, Critical-first, flags, crews, 400s
 tests/test_hospitals.py    overflow: capacity rule, no cross-city transfers, sent = received, utilisation maths
+tests/test_simulator.py    simulator: rebuild equivalence, 0 crews = baseline, more crews never raise cases, ranking, auto-deploy
 ```
 
 ## Tech stack
@@ -136,7 +143,7 @@ tests/test_hospitals.py    overflow: capacity rule, no cross-city transfers, sen
 | Tool / API | Used for |
 |---|---|
 | Claude (Anthropic, claude.ai) | Planning, exploring the data, drafting code for the feature pipeline, training script, inference engine and dashboard, and drafting documentation. The team reviewed, ran, tested and modified all code and can explain it. |
-| Claude Code (Anthropic) | Building the web frontend (server/, web/), API tests and the Streamlit restyle. In Phase 2, drafting the resource allocation and hospital overflow engines, their APIs, tests and the Resources and Hospitals views. The team reviewed, ran and tested all changes. |
+| Claude Code (Anthropic) | Building the web frontend (server/, web/), API tests and the Streamlit restyle. In Phase 2, drafting the resource allocation, hospital overflow and vector-control simulator engines, their APIs, tests and the Resources, Hospitals and Simulator views. The team reviewed, ran and tested all changes. |
 
 **External APIs at runtime: none.** The app makes no network calls and uses no LLM.
 

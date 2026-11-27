@@ -7,9 +7,10 @@ import { mountCity } from "./views/city.js";
 import { mountModel } from "./views/model.js";
 import { mountHospitals } from "./views/hospitals.js";
 import { mountResources } from "./views/resources.js";
+import { mountSimulator } from "./views/simulator.js";
 import { mountWard } from "./views/ward.js";
 
-const VIEWS = { ward: mountWard, city: mountCity, model: mountModel, resources: mountResources, hospitals: mountHospitals };
+const VIEWS = { ward: mountWard, city: mountCity, model: mountModel, resources: mountResources, hospitals: mountHospitals, simulator: mountSimulator };
 const viewEl = document.getElementById("view");
 const nav = document.querySelector(".seg--nav");
 let current = null, currentName = "";
@@ -62,7 +63,7 @@ function markNav(view) {
   placeThumb(nav);
   const on = nav.querySelector('[aria-current="page"]');  // keep the active tab visible when the nav scrolls (phones)
   if (on && nav.scrollWidth > nav.clientWidth) nav.scrollLeft = on.offsetLeft - (nav.clientWidth - on.offsetWidth) / 2;
-  document.title = `${{ ward: "Ward", city: "City", model: "Model", resources: "Resources", hospitals: "Hospitals" }[view]} · Dengue Watch`;
+  document.title = `${{ ward: "Ward", city: "City", model: "Model", resources: "Resources", hospitals: "Hospitals", simulator: "Simulator" }[view]} · Dengue Watch`;
 }
 
 function swapView(s, prev) {

@@ -269,3 +269,56 @@ left. At 75% capacity with expected demand, all 3 overflow beds are routed.
 
 **Cost.** One request is a lookup plus a greedy pass over at most 20 wards per city. It takes about
 20 ms, and results are cached per (city, week, horizon, capacity, basis).
+
+### 7.3 What-if vector control simulator (`src/simulator.py`, `GET/POST /api/simulate`, `GET /api/simulate/rank`)
+
+**Mechanism.** Larviciding and fogging remove breeding sites. The simulator models a crew as a cut
+in the ward's `water_logging_risk_index`:
+`reduction = min(50%, 1 − (1 − e)^crews)`, with e = 10% per crew by default (adjustable 5–20%).
+At 10%, 1 crew cuts the index by 10%, 3 crews by 27%, and the 50% cap is reached at 7 crews.
+
+**Model-driven counterfactual, not a fixed percentage.** The index enters the deployed model in two
+features: the index itself and `rain_sum_4w × index`. Crews are deployed in the issue week, and the
+LightGBM point, q10 and q90 models are re-run for h = 2, 3 and 4, so the effect lands in the
+2-to-4-week window. `RiskEngine.what_if_frame(..., waterlog_pct=)` rebuilds one ward's features from
+modified raw rows. Because both features are linear in the index, the simulator instead scales those
+two columns directly. Tests check that this matches the full rebuild exactly (difference 0.0), and it
+lets one batched model run cover all 60 wards × 3 horizons × every crew level.
+
+**Monotone guard.** Tree models are step functions and have no monotone constraint on this feature.
+On 2024–25 test weeks, 24–39% of ward-weeks show a small *increase* (up to about 1 case) at some
+lower index. The scenario for *c* crews is therefore the lowest prediction over 0..*c* crews (a team
+can always do less). More crews never raise a forecast, and 0 crews equals the baseline forecast
+exactly. Tests check both.
+
+**Size of the effect (measured, 2024–25 test weeks, all wards).** A 27% cut in the index (3 crews)
+lowers forecast cases by 12–13% on average. The 50% cap lowers them by 22–24%. The effect is larger
+in rainy, flood-prone, high-risk wards, where rain × water-logging drives the forecast. For example,
+2 crews in DSCC Ward 06 in the demo week take its forecast from 47.2 to 37.9 cases over 2–4 weeks.
+
+**Impact per ward and horizon.** Baseline vs scenario cases (with the 80% range and tier), beds and
+saline as `round(k × cases)` using the learned rates from 7.1, and prevented = baseline − scenario.
+Beds summed over the three forecast weeks are reported as *bed-weeks*.
+**ROI = cases prevented over h2 + h3 + h4 ÷ crews.**
+
+**Ranking and auto-deploy.**
+- `/api/simulate/rank` ranks every ward in scope by **1-crew ROI**. It also shows the best ROI at any
+  crew count (some wards need 2 crews before the tree model's forecast moves) and the cases
+  prevented at the cap.
+- `?auto=N` deploys N crews by **greedy marginal ROI**. Each step gives crews to the ward and
+  increment with the most extra cases prevented per crew. It compares every increment (+1, +2, …),
+  so it can see past plateaus where one more crew alone changes nothing. It stops early if no ward
+  can prevent more cases, and reports the spare crews. Tests check that it beats two naive plans
+  (1 crew to each top-N ward; all N to the top ward).
+
+**Demo week** (data up to 2025-07-07, effect 10%): auto-deploying 10 crews places them in 6 wards
+and prevents 41.1 forecast cases over 2–4 weeks (14 bed-weeks, 95 saline bags), ROI 4.1 cases per
+crew. With 20 crews: 72.2 cases, 22 bed-weeks and 170 saline bags, ROI 3.6. The ROI falls as the best
+wards are used up.
+
+**Cost.** One batched run (60 wards × 3 horizons × up to 15 crew levels × 3 models) takes about
+70–90 ms. It is cached per (issue week, effect), so ranking, manual plans and auto-deploy are then
+lookups of about 3 ms.
+
+**Limits (stated in the UI).** This is the model's counterfactual, not a field trial. The dataset
+has no intervention history, so the per-crew effect `e` is an assumption the user can adjust.

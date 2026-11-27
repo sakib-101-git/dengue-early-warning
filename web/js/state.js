@@ -1,14 +1,30 @@
 // App state <-> URL. Every view is shareable and the back button works.
-const KEYS = ["view", "city", "ward", "h", "date", "rain", "temp", "hum", "year", "scope", "stock", "crews", "floor", "cap", "basis"];
-const NUMERIC = new Set(["h", "rain", "temp", "hum", "year", "stock", "crews", "floor", "cap"]);
-const VIEWS = ["ward", "city", "model", "resources", "hospitals"];
+const KEYS = ["view", "city", "ward", "h", "date", "rain", "temp", "hum", "year", "scope", "stock", "crews", "floor", "cap", "basis", "effect", "deploy"];
+const NUMERIC = new Set(["h", "rain", "temp", "hum", "year", "stock", "crews", "floor", "cap", "effect"]);
+const VIEWS = ["ward", "city", "model", "resources", "hospitals", "simulator"];
 // Resources defaults: a scarce-but-workable scenario so the allocation engine has something to do.
 export const RES_DEFAULTS = { scope: "all", stock: 60, crews: 40, floor: 0 };
 // Hospitals defaults: assumed capacity as derived (100%), planning for surge demand (upper end of the forecast).
 export const HOSP_DEFAULTS = { cap: 100, basis: "surge" };
+// Simulator defaults: 10% water-logging cut per crew, no crews deployed yet.
+export const SIM_DEFAULTS = { effect: 10, deploy: "" };
+export const MAX_CREWS_PER_WARD = 20;
+
+/** "DNCC_Ward_01:2,DSCC_Ward_03:1" <-> { DNCC_Ward_01: 2, DSCC_Ward_03: 1 } (sorted, zeros dropped). */
+export function decodeDeploy(text) {
+  const out = {};
+  for (const part of String(text || "").split(",")) {
+    const [w, n] = part.split(":");
+    const c = Math.round(Number(n));
+    if (w && Number.isFinite(c) && c > 0) out[w.trim()] = Math.min(MAX_CREWS_PER_WARD, c);
+  }
+  return out;
+}
+export const encodeDeploy = (plan) =>
+  Object.keys(plan).filter((w) => plan[w] > 0).sort().map((w) => `${w}:${plan[w]}`).join(",");
 
 const listeners = new Set();
-export const state = { view: "ward", city: "", ward: "", h: 3, date: "", rain: 0, temp: 0, hum: 0, year: 0, ...RES_DEFAULTS, ...HOSP_DEFAULTS };
+export const state = { view: "ward", city: "", ward: "", h: 3, date: "", rain: 0, temp: 0, hum: 0, year: 0, ...RES_DEFAULTS, ...HOSP_DEFAULTS, ...SIM_DEFAULTS };
 let meta = null;
 
 export function initState(m) {
@@ -51,6 +67,13 @@ function sanitize() {
   state.floor = state.floor === 20 ? 20 : 0;
   state.cap = state.cap ? clamp(Math.round(state.cap / 5) * 5, 50, 200) : HOSP_DEFAULTS.cap;
   if (state.basis !== "expected" && state.basis !== "surge") state.basis = HOSP_DEFAULTS.basis;
+  state.effect = state.effect ? clamp(Math.round(state.effect), 5, 20) : SIM_DEFAULTS.effect;
+  const known = new Set(meta.cities.flatMap((c) => c.wards.map((w) => w.id)));
+  const plan = decodeDeploy(state.deploy);
+  const cityOf = Object.fromEntries(meta.cities.flatMap((c) => c.wards.map((w) => [w.id, c.name])));
+  // crews only count inside the current scope, so the impact always matches the ranking shown
+  for (const w of Object.keys(plan)) if (!known.has(w) || (state.scope !== "all" && cityOf[w] !== state.scope)) delete plan[w];
+  state.deploy = encodeDeploy(plan);
 }
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, Number(v) || 0));
@@ -73,6 +96,10 @@ function toUrl() {
     if (state.floor) q.set("floor", String(state.floor));
   }
   if (state.view === "hospitals") { q.set("scope", state.scope); q.set("cap", String(state.cap)); q.set("basis", state.basis); }
+  if (state.view === "simulator") {
+    q.set("scope", state.scope); q.set("effect", String(state.effect));
+    if (state.deploy) q.set("deploy", state.deploy);
+  }
   return `${location.pathname}?${q}`;
 }
 

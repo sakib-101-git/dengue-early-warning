@@ -248,3 +248,35 @@ export function backtestOption(backtest, selected) {
     };
   };
 }
+
+// ------------------------------------------------------------------ simulator: cases without vs with crews, h = 2/3/4
+export function simBarsOption(rows) {
+  return (t) => {
+    const cats = rows.map((r) => `${r.h} weeks\n${day(r.target_date)}`);
+    const muted = mix(t.surface3, t.ink3, t.dark ? 0.38 : 0.22);
+    const max = Math.max(1, ...rows.map((r) => r.baseline_cases));
+    const lab = (color, bold) => ({ show: true, position: "top", distance: 6, color, fontFamily: t.mono, fontSize: 11.5,
+      fontWeight: bold ? 600 : 400, formatter: (p) => fmt(p.value) });
+    return {
+      ...base(t),
+      grid: { left: 4, right: 8, top: 34, bottom: 4, containLabel: true },
+      legend: { top: 0, right: 0, icon: "roundRect", itemWidth: 12, itemHeight: 8, textStyle: { color: t.ink2, fontFamily: t.font, fontSize: 12 } },
+      xAxis: { type: "category", data: cats, axisLine: { show: true, lineStyle: { color: t.line2 } }, axisTick: { show: false },
+               axisLabel: { color: t.ink2, fontFamily: t.font, fontSize: 12, lineHeight: 16, margin: 10 } },
+      yAxis: { type: "value", min: 0, max: Math.ceil(max * 1.18), splitNumber: 4, axisLine: { show: false }, axisTick: { show: false },
+               splitLine: splitLine(t), axisLabel: axisLabel(t, { formatter: (v) => Math.round(v) }) },
+      tooltip: { ...base(t).tooltip, trigger: "axis", axisPointer: { type: "shadow", shadowStyle: { color: alpha(t.ink3, 0.08) } },
+        formatter: (ps) => { const r = rows[ps[0].dataIndex];
+          return `<div class="ec-tip"><div class="ec-tip__t">${r.h} weeks ahead · week of ${day(r.target_date, true)}</div>` +
+            row("Without crews", `${fmt(r.baseline_cases)} cases`, muted) + row("With crews", `${fmt(r.scenario_cases)} cases`, t.accent) +
+            row("Prevented", `${fmt(r.prevented_cases)} cases`) +
+            row("Beds", `${r.baseline_beds} → ${r.scenario_beds}`) + row("Saline bags", `${r.baseline_saline} → ${r.scenario_saline}`) + `</div>`; } },
+      series: [
+        { name: "Without crews", type: "bar", barGap: "12%", barMaxWidth: 46, data: rows.map((r) => r.baseline_cases),
+          itemStyle: { color: muted, borderRadius: [6, 6, 0, 0] }, label: lab(t.ink3, false) },
+        { name: "With crews", type: "bar", barMaxWidth: 46, data: rows.map((r) => r.scenario_cases),
+          itemStyle: { color: t.accent, borderRadius: [6, 6, 0, 0] }, label: lab(t.accent, true) },
+      ],
+    };
+  };
+}

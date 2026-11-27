@@ -820,3 +820,59 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
   .hos-ward .hos-lane { grid-column: 2; }
 }
 @media (forced-colors: active) { .hos-lane i, .hos-lane b { forced-color-adjust: none; } }
+
+/* ---------------------------------------------------------------- Simulator (what-if vector control) */
+.sim-controls { grid-template-columns: minmax(240px, 1.3fr) minmax(260px, 1.1fr) minmax(200px, .9fr); }
+.sim-controls .numstep { flex-wrap: wrap; }
+.sim-controls .numstep input { width: 72px; }
+.numstep .sim-go { width: auto; height: 40px; padding: 0 16px; margin-left: 4px; font-size: 14px; }
+.sim-more { margin-top: var(--s3); }
+.sim-more[hidden], .sim-table tr[hidden] { display: none; }
+.sim-go:disabled { opacity: .6; cursor: progress; }
+.sim-deployed__row { display: flex; align-items: baseline; gap: 8px; min-height: 40px; }
+.sim-deployed__row b { font-size: 28px; font-weight: 500; letter-spacing: -.03em; line-height: 1; }
+.sim-deployed__row span { font-size: 13px; color: var(--ink-2); }
+.sim-deployed__row .btn { margin-left: auto; align-self: center; }
+.sim-deployed__row .btn:disabled { opacity: .5; cursor: default; }
+.sim-stat--good b.fig { color: var(--accent-ink, var(--accent)); }
+
+.sim-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: var(--s4); align-items: start; }
+.sim-chart { height: 290px; }
+.sim-chart[hidden], .sim-empty[hidden] { display: none; }
+.sim-empty { padding: var(--s6) 0; }
+
+.sim-impact { list-style: none; margin: 0; padding: 0; max-height: 330px; overflow-y: auto; }
+.sim-impact li { display: grid; grid-template-columns: minmax(130px, 1fr) minmax(150px, auto) minmax(120px, auto); gap: var(--s3); align-items: center;
+                 padding: 9px 0; border-top: 1px solid var(--line); font-size: 13px; }
+.sim-impact li:first-child { border-top: 0; }
+.sim-impact__w { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.sim-impact__w .res-ward { margin-right: 4px; }
+.sim-arrow { color: var(--ink-3); font-size: 12px; }
+.sim-impact__h { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--ink-3); }
+.sim-impact__h i { font-style: normal; display: inline-block; width: 24px; color: var(--ink-3); }
+.sim-impact__h b { color: var(--ink); font-weight: 600; }
+.sim-impact__n { text-align: right; font-size: 12.5px; color: var(--ink-2); display: flex; flex-direction: column; align-items: flex-end; gap: 1px; }
+.sim-impact__n b { font-size: 15px; color: var(--accent-ink, var(--accent)); font-weight: 600; }
+.sim-impact__n small { font-size: 11.5px; color: var(--ink-3); }
+
+.sim-table { min-width: 900px; }
+.sim-table tr.is-deployed td { background: var(--accent-softer); }
+.sim-table tr.is-deployed td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+.sim-roi .cov__lane i { background: var(--accent); }
+.sim-muted { color: var(--ink-3); font-size: 11.5px; }
+.sim-step { display: inline-flex; align-items: center; gap: 6px; }
+.sim-step .btn { width: 28px; height: 28px; padding: 0; font-size: 16px; justify-content: center; }
+.sim-step .btn:disabled { opacity: .4; cursor: default; }
+.sim-step b { min-width: 20px; text-align: center; font-size: 13.5px; font-weight: 600; }
+
+@media (max-width: 1100px) {
+  .sim-split { grid-template-columns: 1fr; }
+}
+@media (max-width: 1024px) {
+  .sim-controls { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 760px) {
+  .sim-controls { grid-template-columns: 1fr; }
+  .sim-impact li { grid-template-columns: 1fr auto; }
+  .sim-impact__h { grid-column: 1 / -1; grid-row: 2; flex-direction: row; flex-wrap: wrap; gap: 4px 12px; }
+}
