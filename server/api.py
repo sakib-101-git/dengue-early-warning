@@ -9,11 +9,13 @@ forecast tables for every horizon are precomputed, so each request is a cheap pa
 from __future__ import annotations
 
 import bisect
+import hashlib
 import json
 import logging
 import mimetypes
 from contextlib import asynccontextmanager
 from datetime import date as Date
+from email.utils import formatdate
 from functools import lru_cache
 from pathlib import Path
 
@@ -21,7 +23,7 @@ import numpy as np
 import pandas as pd
 from fastapi import Body, FastAPI, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from src.config import HORIZONS, METRICS_JSON, TEST_YEARS, TIER_LABELS
@@ -791,9 +793,10 @@ class WebFiles(StaticFiles):
 
     The app's own files (index.html, styles.css, js/*) change with every deploy and are ES modules that
     import each other, so they are served with `Cache-Control: no-cache`: the browser keeps a copy but
-    revalidates it (ETag / Last-Modified -> 304) on every load, so an update is never stuck behind a
-    stale module. Vendored third-party files (vendor/: ECharts, fonts) only change when the vendored
-    version is bumped and may be cached for a week.
+    revalidates it (ETag / Last-Modified -> 304) on every load. On top of that, index.html loads them by
+    content-hashed URLs (see render_index), so a copy cached under older rules is never reused.
+    Vendored third-party files (vendor/: ECharts, fonts) only change when the vendored version is bumped
+    and may be cached for a week.
     """
     VENDOR_MAX_AGE = 7 * 24 * 3600
 
@@ -803,6 +806,58 @@ class WebFiles(StaticFiles):
         resp.headers["Cache-Control"] = (f"public, max-age={self.VENDOR_MAX_AGE}" if p.startswith("vendor/")
                                          else "no-cache")
         return resp
+
+
+# ---------------------------------------------------------------- cache-busting for the app's own files
+# index.html is served with a short content hash on every app file it loads: styles.css?v=…, the entry
+# module js/app.js?v=…, and an import map that pins every other module under js/ to its own ?v=… URL.
+# A browser can therefore never pair a new page with an old stylesheet or module, even one it cached
+# before the no-cache headers existed: changed content = new URL. Vendored files keep plain, cacheable URLs.
+APP_ASSETS = ("styles.css", "js/**/*.js")
+
+
+@lru_cache(maxsize=64)
+def _content_hash(path: str, mtime_ns: int, size: int) -> str:
+    """Short SHA-256 of a file's bytes; keyed on mtime/size so an edited file gets a new hash."""
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()[:10]
+
+
+def asset_versions(web_dir: Path = WEB_DIR) -> dict[str, str]:
+    """{path relative to web/ (posix): content hash} for styles.css and every module under js/."""
+    out = {}
+    for pattern in APP_ASSETS:
+        for f in sorted(web_dir.glob(pattern)):
+            st = f.stat()
+            out[f.relative_to(web_dir).as_posix()] = _content_hash(str(f), st.st_mtime_ns, st.st_size)
+    return out
+
+
+def render_index(web_dir: Path = WEB_DIR) -> str:
+    """index.html with versioned URLs for the stylesheet, the entry module and (via an import map) every
+    module it imports. The file's own bytes (line endings included) are otherwise unchanged."""
+    v = asset_versions(web_dir)
+    html = (web_dir / "index.html").read_bytes().decode("utf-8")
+    css, entry = 'href="styles.css"', '<script type="module" src="js/app.js"></script>'
+    if css not in html or entry not in html:              # never serve a page that could load stale files
+        raise RuntimeError("index.html must link styles.css and load js/app.js as its module entry")
+    imports = {f"./{k}": f"./{k}?v={h}" for k, h in v.items() if k.startswith("js/")}
+    importmap = json.dumps({"imports": imports}, separators=(",", ":"))
+    html = html.replace(css, f'href="styles.css?v={v["styles.css"]}"', 1)
+    return html.replace(entry, f'<script type="importmap">{importmap}</script>'
+                               f'<script type="module" src="js/app.js?v={v["js/app.js"]}"></script>', 1)
+
+
+@app.get("/", include_in_schema=False)
+@app.get("/index.html", include_in_schema=False)
+def index_page(request: Request):
+    """The versioned index: always revalidated (no-cache), with an ETag so an unchanged build is a 304."""
+    html = render_index()
+    newest = max(f.stat().st_mtime for f in [WEB_DIR / "index.html", *(WEB_DIR / k for k in asset_versions())])
+    headers = {"Cache-Control": "no-cache", "Last-Modified": formatdate(newest, usegmt=True),
+               "ETag": '"' + hashlib.sha256(html.encode("utf-8")).hexdigest()[:20] + '"'}
+    if request.headers.get("if-none-match") == headers["ETag"]:
+        return Response(status_code=304, headers=headers)
+    return HTMLResponse(html, headers=headers)
 
 
 app.mount("/", WebFiles(directory=WEB_DIR, html=True), name="web")

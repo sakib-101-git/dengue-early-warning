@@ -2,7 +2,7 @@ import { api, isAbort } from "../api.js";
 import { makeChart, seasonOption } from "../charts.js";
 import { getMeta, setState, wardsOf } from "../state.js";
 import {
-  cardHead, combobox, countUp, day, debounce, errorBox, esc, field, fmt, segmented, signedPct, simPopover, weekStepper,
+  cardHead, combobox, countUp, day, debounce, errorBox, esc, field, fmt, info, segmented, signedPct, simPopover, weekStepper,
 } from "../ui.js";
 
 const TOP_DRIVERS = 5;
@@ -11,14 +11,14 @@ export function mountWard(root, st) {
   const meta = getMeta();
   root.innerHTML = `
     <header class="pagehead"><div>
-      <div class="crumbs"><span data-city></span><i></i><span>Ward forecast</span></div>
+      <div class="crumbs"><span data-city></span><i></i><span>Ward</span></div>
       <h1 data-title>&nbsp;</h1>
       <p data-sub>&nbsp;</p>
     </div></header>
     <section class="toolbar" aria-label="Forecast settings"></section>
     <section class="card hero" aria-labelledby="hero-t">
-      ${cardHead("Rain now, cases later", "Weekly rain hangs from the sky line. Rain in the breeding window drives the forecast.",
-        "Mosquitoes breed in standing water after rain. Eggs become biting adults in 1–2 weeks, then the virus incubates, so rain shows up in hospital cases 2–4 weeks later.").replace("<h2>", '<h2 id="hero-t">')}
+      ${cardHead("Rain now, cases later", "",
+        "Rain in the breeding window (2–4 weeks before) drives the forecast. Mosquitoes breed in standing water, then the virus incubates.").replace("<h2>", '<h2 id="hero-t">')}
       <div class="strip-slot"><div class="skel skel--block" style="height:300px"></div></div>
       <div class="legend strip-legend">
         <span><i style="background:var(--accent)"></i>Rain in the breeding window</span>
@@ -33,15 +33,15 @@ export function mountWard(root, st) {
       <div class="skel skel--line"></div><div class="skel skel--line"></div></div>
     </section>
     <section class="card span-7" aria-labelledby="drv-t">
-      ${cardHead("What pushes the risk", "Effect of each factor on expected cases this week").replace("<h2>", '<h2 id="drv-t">')}
+      <div class="card__head"><div><h2 id="drv-t">What pushes the risk</h2></div><div class="right" data-drv-tip></div></div>
       <div class="drv-slot">${'<div class="skel skel--line" style="height:20px;margin:14px 0"></div>'.repeat(5)}</div>
     </section>
     <section class="card" aria-labelledby="season-t">
-      ${cardHead("", "Forecast and recorded cases each week, with the likely range").replace("<h2>", '<h2 id="season-t" data-season-title>')}
+      ${cardHead("", "", "The shaded band is the likely range; 8 in 10 weeks fall inside it.").replace("<h2>", '<h2 id="season-t" data-season-title>')}
       <div class="chart chart--season" data-season role="img"></div>
       <div class="legend">
         <span><i class="line" style="background:var(--accent)"></i>Forecast</span>
-        <span><i style="background:color-mix(in srgb,var(--accent) 22%,transparent)"></i>Likely range (8 in 10 weeks)</span>
+        <span><i style="background:color-mix(in srgb,var(--accent) 22%,transparent)"></i>Likely range</span>
         <span><i class="dot" style="background:var(--ink)"></i>Recorded cases</span>
         <span><i class="dot" data-tier-swatch></i>This forecast</span>
       </div>
@@ -62,8 +62,8 @@ export function mountWard(root, st) {
   bar.append(
     field("City", cityBox.el),
     field("Ward", wardBox.el),
-    field("Weeks ahead", hSeg.el, { cls: "field--h", tip: "How far ahead to warn. Rain needs 2–4 weeks to turn into cases." }),
-    field("Data up to", stepper.el, { cls: "field--date", tip: "The forecast only uses weather up to this week." }),
+    field("Weeks ahead", hSeg.el, { cls: "field--h" }),
+    field("Data up to", stepper.el, { cls: "field--date", tip: "Forecasts use data up to this week." }),
     field("What if?", sim.el, { cls: "field--sim" }),
   );
 
@@ -96,7 +96,7 @@ export function mountWard(root, st) {
     root.querySelector("[data-city]").textContent = f.city;
     root.querySelector("[data-title]").textContent = f.ward_label;
     root.querySelector("[data-sub]").innerHTML =
-      `Forecast for the week of <b>${day(f.target_date, true)}</b>, ${f.horizon} weeks ahead`;
+      `Week of <b>${day(f.target_date, true)}</b>`;
     root.querySelectorAll("[data-tier-swatch]").forEach((el) => { el.className = el.className.replace(/\btier-\w+/g, "").trim(); el.classList.add(`tier-${f.tier}`); el.style.background = "var(--tier)"; });
     renderStrip(root.querySelector(".strip-slot"), d);
     renderSummary(root.querySelector(".sum-slot"), d);
@@ -184,7 +184,7 @@ function renderStrip(slot, d) {
       ${cols}${waits}
       <div class="target tier-${f.tier}" style="grid-column:${targetCol}">
         <span class="target__tier tier-${f.tier}" data-ttier>${f.tier} risk</span>
-        <div><b class="fig" data-tnum>0.0</b><small data-trng></small></div>
+        <div><b class="fig" data-tnum>0</b><small data-trng></small></div>
       </div>
       ${ticks}${brackets}
     </div>`;
@@ -210,10 +210,10 @@ function retarget(strip, f, fresh = false) {
   tt.textContent = `${f.tier} risk`;
   strip.querySelector("[data-tbr]").className = `bracket bracket--target tier-${f.tier}`;
   strip.querySelector("[data-trng]").innerHTML =
-    `cases expected<span class="long"> · likely ${Math.round(f.low_80)}–${Math.round(f.high_80)}</span>`;
+    "cases expected";
   const num = strip.querySelector("[data-tnum]");
-  if (fresh) setTimeout(() => countUp(num, f.expected, { decimals: 1, duration: 1000 }), 420);
-  else countUp(num, f.expected, { decimals: 1, duration: 500 });
+  if (fresh) setTimeout(() => countUp(num, f.expected, { decimals: 0, duration: 1000 }), 420);
+  else countUp(num, f.expected, { decimals: 0, duration: 500 });
 }
 
 function stripLabel(d) {
@@ -231,39 +231,38 @@ function renderSummary(slot, d) {
   if (!slot.querySelector("[data-big]")) {
     slot.innerHTML = `
       <div class="summary__top"><span class="tier" data-tier></span><span class="chip" data-simchip hidden>Simulated weather</span></div>
-      <div class="big fig" data-big aria-live="polite">0.0</div>
+      <div class="big fig" data-big aria-live="polite">0</div>
       <p class="big-sub" data-bigsub></p>
       <p class="delta" data-delta hidden></p>
       <dl class="kv">
         <dt>Likely range</dt><dd data-range></dd>
         <dt>Recorded</dt><dd data-actual></dd>
-        <dt>Warning lead time</dt><dd data-lead></dd>
       </dl>`;
   }
   const tier = slot.querySelector("[data-tier]");
   tier.className = `tier tier-${f.tier}`;
   tier.textContent = `${f.tier} risk`;
   slot.querySelector("[data-simchip]").hidden = !d.simulated;
-  countUp(slot.querySelector("[data-big]"), f.expected, { decimals: 1, duration: 900 });
-  slot.querySelector("[data-bigsub]").innerHTML =
-    `cases expected in <b>${esc(f.ward_label)}, ${esc(f.city)}</b>, week of ${day(f.target_date, true)}`;
+  countUp(slot.querySelector("[data-big]"), f.expected, { decimals: 0, duration: 900 });
+  slot.querySelector("[data-bigsub]").textContent = "cases expected";
   const delta = slot.querySelector("[data-delta]");
   delta.hidden = !d.simulated;
   if (d.simulated) {
     const dv = f.expected - b.expected;
-    delta.textContent = `${dv >= 0 ? "+" : "−"}${Math.abs(dv).toFixed(1)} cases vs. the weather that actually happened (${fmt(b.expected)}, ${b.tier.toLowerCase()} risk)`;
+    delta.textContent = `${dv >= 0 ? "+" : "−"}${Math.abs(dv).toFixed(1)} cases vs recorded weather (${fmt(b.expected)}, ${b.tier.toLowerCase()} risk)`;
   }
   slot.querySelector("[data-range]").textContent = `${Math.round(f.low_80)}–${Math.round(f.high_80)} cases`;
   const act = slot.querySelector("[data-actual]");
   act.textContent = f.actual === null ? "Not yet recorded" : `${f.actual} cases`;
   act.classList.toggle("muted", f.actual === null);
-  slot.querySelector("[data-lead]").textContent = `${f.horizon} weeks · issued ${day(f.issue_date)}`;
 }
 
 // ---------------------------------------------------------------- drivers (diverging bars)
 function renderDrivers(slot, d) {
+  const tip = slot.closest(".card").querySelector("[data-drv-tip]");
+  tip.innerHTML = info(`Change in expected cases vs a typical ward-week (${fmt(d.typical_cases)} cases). Factors multiply, so percentages don't add up.`);
   const rows = d.drivers.filter((x) => Math.abs(x.log_effect) > 0.01).slice(0, TOP_DRIVERS);
-  if (!rows.length) { slot.innerHTML = `<p class="card__head"><span style="color:var(--ink-3)">No single factor stands out this week.</span></p>`; return; }
+  if (!rows.length) { slot.innerHTML = `<p class="res-ok">No single factor stands out this week.</p>`; return; }
   const m = Math.max(...rows.map((r) => Math.abs(r.log_effect)));
   slot.innerHTML = `<div class="drivers" role="list" aria-label="Factors that change expected cases">
     <div class="drv-axis" aria-hidden="true"><span></span><div><span>Lowers risk</span><span>Raises risk</span></div><span></span></div>
@@ -274,6 +273,5 @@ function renderDrivers(slot, d) {
         <span>${esc(r.label)}</span>
         <div class="drv__track"><div class="drv__bar ${up ? "up" : "down"}" style="left:${up ? 50 : 50 - w}%;width:${w}%;animation-delay:${i * 60}ms"></div></div>
         <span class="drv__val ${up ? "up" : "down"}">${signedPct(r.pct_effect)}</span></div>`;
-    }).join("")}</div>
-    <p class="note">Compared with a typical ward-week (${fmt(d.typical_cases)} cases). Factors multiply, so percentages don't add up.</p>`;
+    }).join("")}</div>`;
 }

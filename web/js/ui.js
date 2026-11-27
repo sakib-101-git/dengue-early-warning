@@ -29,8 +29,66 @@ export const icon = {
   arrow: `<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M5 12h13M13 6.5l5.5 5.5-5.5 5.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
 };
 
-export const info = (text) =>
-  `<span class="info" tabindex="0" role="button" aria-label="${esc(text)}">${icon.info}<span role="tooltip">${esc(text)}</span></span>`;
+// ---- info tooltip: one per card. Keyboard-focusable button, described by its tooltip; hover / focus /
+// tap to open, Esc or a click outside closes. Flips to stay inside the viewport.
+// Info tooltips. The tip is `hidden` in the markup and only JS reveals it, so even without the
+// stylesheet no explanation text shows inline. Shown while hovered (mouse), keyboard-focused or
+// opened by click/tap; Esc dismisses it, a click or tap outside closes it.
+let tipSeq = 0;
+export const info = (text, label = "More information") => {
+  const id = `tip${++tipSeq}`;
+  return `<span class="info"><button type="button" class="info__btn" aria-label="${esc(label)}" aria-describedby="${id}">${icon.info}</button>` +
+    `<span class="info__tip" role="tooltip" id="${id}" hidden>${esc(text)}</span></span>`;
+};
+
+const canHover = matchMedia("(hover: hover)");
+function syncTip(box) {
+  const tip = box.querySelector(".info__tip");
+  if (!tip) return;
+  const c = box.classList;
+  const show = (c.contains("is-open") || c.contains("is-hover") || c.contains("is-focus")) && !c.contains("is-dismissed");
+  if (show === !tip.hidden) return;
+  tip.hidden = !show;
+  if (!show) return;
+  c.remove("info--l", "info--up");                     // keep the tip on screen
+  const r = tip.getBoundingClientRect();
+  if (r.left < 8) c.add("info--l");
+  if (r.bottom > innerHeight - 8 && r.height + 40 < box.getBoundingClientRect().top) c.add("info--up");
+}
+const setTip = (box, cls, on) => { box.classList.toggle(cls, on); syncTip(box); };
+const closeTips = (except) => document.querySelectorAll(".info.is-open").forEach((b) => { if (b !== except) setTip(b, "is-open", false); });
+document.addEventListener("click", (e) => {
+  const btn = e.target.closest(".info__btn");
+  if (!btn) return;
+  e.preventDefault();                                  // never activate a surrounding <label>
+  const box = btn.parentElement;
+  closeTips(box);
+  box.classList.remove("is-dismissed");
+  setTip(box, "is-open", !box.classList.contains("is-open"));
+});
+document.addEventListener("pointerdown", (e) => { if (!e.target.closest(".info")) closeTips(); }, true);
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  document.querySelectorAll(".info.is-open, .info.is-hover, .info.is-focus").forEach((b) => {
+    b.classList.remove("is-open"); setTip(b, "is-dismissed", true);
+  });
+});
+document.addEventListener("mouseover", (e) => {
+  const b = e.target.closest?.(".info");
+  if (b && canHover.matches && !b.contains(e.relatedTarget)) setTip(b, "is-hover", true);
+});
+document.addEventListener("mouseout", (e) => {
+  const b = e.target.closest?.(".info");
+  if (b && !b.contains(e.relatedTarget)) { b.classList.remove("is-dismissed"); setTip(b, "is-hover", false); }
+});
+document.addEventListener("focusin", (e) => {
+  const btn = e.target.closest?.(".info__btn");
+  if (btn && btn.matches(":focus-visible")) setTip(btn.parentElement, "is-focus", true);
+});
+document.addEventListener("focusout", (e) => {
+  const b = e.target.closest?.(".info");
+  if (b) { b.classList.remove("is-dismissed", "is-open"); setTip(b, "is-focus", false); }
+});
 
 export function cardHead(title, sub = "", tip = "", right = "") {
   return `<div class="card__head"><div><h2>${esc(title)}</h2>${sub ? `<p>${esc(sub)}</p>` : ""}</div>` +
@@ -219,14 +277,14 @@ export function simPopover({ values, onInput, onReset }) {
   const el = document.createElement("div");
   el.className = "pop";
   el.innerHTML =
-    `<button type="button" class="btn" aria-haspopup="dialog" aria-expanded="false">${icon.tune}<span>Simulate weather</span><span class="badge" hidden></span></button>` +
-    `<div class="pop__panel" role="dialog" aria-label="Simulate weather" hidden>` +
-    `<h3>Simulate weather</h3><p>Change the last 4 weeks and watch the forecast move.</p>` +
+    `<button type="button" class="btn" aria-haspopup="dialog" aria-expanded="false">${icon.tune}<span>Change weather</span><span class="badge" hidden></span></button>` +
+    `<div class="pop__panel" role="dialog" aria-label="Change weather" hidden>` +
+    `<h3>Change the last 4 weeks</h3>` +
     SLIDERS.map((s) =>
       `<div class="slider"><div class="slider__top"><label for="sim-${s.key}">${s.label}</label><output for="sim-${s.key}"></output></div>` +
       `<input id="sim-${s.key}" type="range" min="${s.min}" max="${s.max}" step="${s.step}" data-k="${s.key}">` +
       `<div class="slider__ends" aria-hidden="true"><span>${s.ends[0]}</span><span>${s.ends[1]}</span></div></div>`).join("") +
-    `<div class="pop__foot"><span>Uses the same model, re-run live.</span><button type="button" class="btn btn--sm" data-reset>${icon.reset}Reset</button></div></div>`;
+    `<div class="pop__foot"><span></span><button type="button" class="btn btn--sm" data-reset>${icon.reset}Reset weather</button></div></div>`;
   const btn = el.querySelector(".btn");
   const panel = el.querySelector(".pop__panel");
   const badge = el.querySelector(".badge");

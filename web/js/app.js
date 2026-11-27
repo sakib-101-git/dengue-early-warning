@@ -2,6 +2,7 @@
 import { api } from "./api.js";
 import { disposeAll, rethemeAll } from "./charts.js";
 import { getMeta, initState, setState, state, subscribe } from "./state.js";
+import { mountHelp } from "./help.js";
 import { mountNetChip } from "./net.js";
 import { errorBox, placeThumb, reducedMotion, watchSeg } from "./ui.js";
 import { mountCity } from "./views/city.js";
@@ -116,6 +117,7 @@ function onState(s, prev) {
 // ------------------------------------------------------------------ boot
 async function boot() {
   mountNetChip(document.getElementById("net"));   // independent of the views: works even if meta fails
+  mountHelp(document.querySelector(".help"));
   viewEl.innerHTML = `<div class="pagehead"><div><div class="skel skel--line" style="width:120px"></div><div class="skel skel--big" style="width:240px;height:40px"></div></div></div>
     <div class="card"><div class="skel skel--block" style="height:300px"></div></div>`;
   let meta;

@@ -51,6 +51,22 @@
       <span class="net is-checking" id="net" role="status" aria-live="polite" tabindex="0" title="Checking the server…">
         <i class="net__dot" aria-hidden="true"></i><span class="net__txt">Checking</span>
       </span>
+      <div class="help">
+        <button class="icon-btn help-btn" type="button" aria-label="What each tab is for" aria-haspopup="dialog" aria-expanded="false" aria-controls="help-pop">?</button>
+        <div class="help-pop" id="help-pop" role="dialog" aria-label="What each tab is for" hidden>
+          <h2>What each tab is for</h2>
+          <dl>
+            <dt>Ward</dt><dd>Forecast for one ward, and why</dd>
+            <dt>City</dt><dd>Which wards need teams first</dd>
+            <dt>Model</dt><dd>How accurate the forecast is</dd>
+            <dt>Resources</dt><dd>Share limited stock by risk</dd>
+            <dt>Hospitals</dt><dd>Find bed shortfalls, move patients</dd>
+            <dt>Simulator</dt><dd>Test where crews prevent most cases</dd>
+            <dt>Dispatch</dt><dd>Send SMS, WhatsApp or print briefs</dd>
+          </dl>
+          <p>Hover or tap ⓘ to see how a number is made.</p>
+        </div>
+      </div>
       <button class="icon-btn theme-toggle" type="button" aria-label="Switch to dark theme">
         <svg class="i-sun" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
         <svg class="i-moon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M20.2 14.6A8.4 8.4 0 0 1 9.4 3.8a8.4 8.4 0 1 0 10.8 10.8z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
@@ -64,8 +80,7 @@
   </main>
 
   <footer class="foot">
-    <span>Dengue Watch · LightGBM forecasts from weekly rainfall, temperature and humidity</span>
-    <span>Runs fully offline · no external APIs</span>
+    <span>Dengue Watch · works offline</span>
   </footer>
 
   <noscript><p class="noscript">Dengue Watch needs JavaScript to show forecasts.</p></noscript>

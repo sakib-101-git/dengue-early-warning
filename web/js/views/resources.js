@@ -7,19 +7,22 @@ const n = (v) => Number(v).toLocaleString("en-US");
 const pc = (v) => `${Math.round(v * 100)}%`;
 const FLAG_CLS = { "CRITICAL DEFICIT": "flag--crit", WARNING: "flag--warn" };
 const STOCK = { min: 30, max: 100, step: 5 };
+// Plain names on screen (API labels: Saline bags / Diagnostic kits / Hospital beds).
+const NAME = { saline: "Saline bags", kits: "Test kits", beds: "Extra beds" };
+const SHORT = { saline: "Saline", kits: "Kits", beds: "Extra beds" };
 
 export function mountResources(root, st) {
   const meta = getMeta();
   root.innerHTML = `
     <header class="pagehead"><div>
-      <div class="crumbs"><span>Resource allocation</span></div>
+      <div class="crumbs"><span>Resources</span></div>
       <h1 data-title>&nbsp;</h1>
       <p data-sub>&nbsp;</p>
     </div></header>
     <section class="toolbar toolbar--city" aria-label="Forecast settings"></section>
     <section class="card res-controls" aria-labelledby="sc-t">
-      ${cardHead("Scarcity controls", "Drag to see who goes short. The plan re-runs live.",
-        "Available stock is a share of what the wards in scope need this week. Crews are assigned down the same priority list.").replace("<h2>", '<h2 id="sc-t">')}
+      ${cardHead("Stock and crews", "",
+        "Stock is a share of what the wards in scope need; stock and crews go down the priority list. With the 20% floor, every ward first gets a fifth of its need.").replace("<h2>", '<h2 id="sc-t">')}
       <div class="res-controls__grid">
         <div class="slider res-slider">
           <div class="slider__top"><label for="res-stock">Available regional stock</label><output for="res-stock" class="is-on"></output></div>
@@ -42,15 +45,14 @@ export function mountResources(root, st) {
       ${'<div class="card"><div class="skel skel--line" style="width:40%"></div><div class="skel skel--big" style="width:70%"></div></div>'.repeat(4)}
     </section>
     <section class="card" aria-labelledby="al-t" data-alerts-card>
-      <div class="card__head"><div><h2 id="al-t">Deficit alerts</h2><p data-alerts-sub>&nbsp;</p></div></div>
+      <div class="card__head"><div><h2 id="al-t">Deficit alerts</h2><p data-alerts-sub>&nbsp;</p></div>
+        <div class="right">${info("CRITICAL DEFICIT: a High or Critical risk ward gets less than it needs. WARNING: a lower-risk ward does.")}</div></div>
       <div data-alerts></div>
     </section>
     <section class="card" aria-labelledby="tb-t">
-      <div class="card__head"><div><h2 id="tb-t">Allocation plan by priority</h2>
-        <p>Wards are served from the top of the list down. Select a ward to open its forecast.</p></div>
-        <div class="right"><span class="chip">Priority rule</span><span data-rule></span></div></div>
+      <div class="card__head"><div><h2 id="tb-t">Plan by priority</h2></div>
+        <div class="right"><span data-rule></span></div></div>
       <div class="res-table-wrap" data-table>${'<div class="skel skel--line" style="height:22px;margin:14px 0"></div>'.repeat(8)}</div>
-      <p class="res-foot" data-rates></p>
     </section>`;
 
   // ---- toolbar
@@ -62,7 +64,7 @@ export function mountResources(root, st) {
     onChange: (v) => setState({ h: Number(v) }) });
   const stepper = weekStepper({ value: st.date, min: meta.min_date, max: meta.max_date, onChange: (v) => setState({ date: v }) });
   bar.append(field("Scope", scopeBox.el), field("Weeks ahead", hSeg.el, { cls: "field--h" }),
-             field("Data up to", stepper.el, { cls: "field--date", tip: "Supplies are planned for the forecast week: data-up-to week + weeks ahead." }));
+             field("Data up to", stepper.el, { cls: "field--date", tip: "Forecasts use data up to this week." }));
 
   // ---- scarcity controls
   const stock = root.querySelector("#res-stock");
@@ -88,10 +90,10 @@ export function mountResources(root, st) {
     pushCrews(Number(crews.value));
   });
 
-  const floorSeg = segmented({ label: "Minimum coverage floor", items: [{ value: 0, label: "Off" }, { value: 20, label: "20% for every ward" }],
+  const floorSeg = segmented({ label: "Minimum per ward", items: [{ value: 0, label: "Off" }, { value: 20, label: "20% each" }],
     value: st.floor, onChange: (v) => setState({ floor: Number(v) }, { push: false }) });
   root.querySelector("[data-floor]").append(
-    Object.assign(document.createElement("div"), { className: "label", innerHTML: `Minimum coverage floor${info("Off: pure priority fill. 20%: after Critical wards are filled, every other ward gets at least 20% of its need before the rest goes down the list.")}` }),
+    Object.assign(document.createElement("div"), { className: "label", textContent: "Minimum per ward" }),
     floorSeg.el);
 
   // ---- data
@@ -114,20 +116,18 @@ export function mountResources(root, st) {
 
   function render(d) {
     root.querySelector("[data-title]").textContent = `Supplies · ${d.scope_label}`;
-    root.querySelector("[data-sub]").innerHTML =
-      `Week of <b>${day(d.target_date, true)}</b> · ${d.horizon} weeks ahead · data up to ${day(d.issue_date)} · ${d.n_wards} wards`;
+    root.querySelector("[data-sub]").innerHTML = `Week of <b>${day(d.target_date, true)}</b> · ${d.n_wards} wards`;
     const c = d.crews;
     root.querySelector("[data-crew-hint]").innerHTML = c.unmet
-      ? `<b>${n(c.needed)}</b> needed · <span class="txt-crit">${n(c.unmet)} short</span> across ${c.wards_short} wards`
-      : `<b>${n(c.needed)}</b> needed · all covered${c.spare ? ` · ${n(c.spare)} spare` : ""}`;
+      ? `Need <b>${n(c.needed)}</b> · <span class="txt-crit">short ${n(c.unmet)}</span> in ${c.wards_short} wards`
+      : `Need <b>${n(c.needed)}</b> · all covered${c.spare ? ` · ${n(c.spare)} spare` : ""}`;
     renderStats(d);
     renderAlerts(d);
     renderTable(d);
     const rule = root.querySelector("[data-rule]");
-    if (!rule.firstChild) rule.innerHTML = info(d.priority_rule);
-    root.querySelector("[data-rates]").innerHTML = `Units per expected case, least-squares fit on ${esc(d.rates_fit.fit_years)} training years: ` +
-      d.supplies.map((s) => `${esc(s.label.toLowerCase())} <b class="num">${s.k.toFixed(3)}</b> (R² ${s.r2_test.toFixed(3)} on ${d.rates_fit.test_years.join("–")})`).join(" · ") +
-      `. Required = round(k × expected cases); safety uses the upper end of the 80% range.`;
+    if (!rule.firstChild) rule.innerHTML = info("Served top down: risk first, then expected cases × crowding. Need = rate × expected cases (" +
+      d.supplies.map((s) => `${SHORT[s.key].toLowerCase()} ${s.k.toFixed(2)}`).join(", ") +
+      ` per case, learned from ${d.rates_fit.fit_years} data).`);
   }
 
   function renderStats(d) {
@@ -135,15 +135,15 @@ export function mountResources(root, st) {
     if (!slot.querySelector("[data-crit]")) {
       slot.innerHTML = d.supplies.map((s) => `
         <div class="card res-stat" data-s="${s.key}">
-          <div class="res-stat__top"><span>${esc(s.label)}</span><small class="num">k ${s.k.toFixed(2)}/case</small></div>
-          <b class="fig" data-req>0</b><em>required</em>
+          <div class="res-stat__top"><span>${esc(NAME[s.key])}</span><span data-safety></span></div>
+          <b class="fig" data-req>0</b><em>need</em>
           <div class="res-bar" aria-hidden="true"><i data-bar></i></div>
-          <p data-line>&nbsp;</p><small data-safety>&nbsp;</small>
+          <p data-line>&nbsp;</p>
         </div>`).join("") + `
         <div class="card res-stat res-stat--crit">
-          <div class="res-stat__top"><span>Critical deficits</span>${info("High or Critical risk wards that cannot get 100% of any supply.")}</div>
+          <div class="res-stat__top"><span>Critical deficits</span>${info("High or Critical risk wards that get less than 100% of any supply.")}</div>
           <b class="fig" data-crit>0</b><em>wards</em>
-          <p data-crit-line>&nbsp;</p><small data-warn>&nbsp;</small>
+          <p data-crit-line>&nbsp;</p>
         </div>`;
     }
     for (const s of d.supplies) {
@@ -152,26 +152,22 @@ export function mountResources(root, st) {
       el.querySelector("[data-req]").textContent = n(t.required);
       el.querySelector("[data-bar]").style.width = `${t.required ? (100 * t.available) / t.required : 100}%`;
       el.querySelector("[data-line]").innerHTML = t.unmet
-        ? `<b>${n(t.available)}</b> available · <span class="txt-crit">${n(t.unmet)} short</span> in ${t.wards_short} ward${t.wards_short === 1 ? "" : "s"}`
-        : `<b>${n(t.available)}</b> available · every ward covered`;
-      el.querySelector("[data-safety]").textContent = `Safety stock (upper forecast): ${n(t.safety)}`;
+        ? `Getting <b>${n(t.available)}</b> · <span class="txt-crit">short ${n(t.unmet)}</span> in ${t.wards_short} ward${t.wards_short === 1 ? "" : "s"}`
+        : `Getting <b>${n(t.available)}</b> · all covered`;
+      el.querySelector("[data-safety]").innerHTML = info(`${s.k.toFixed(2)} per expected case, learned from past data. For a bad week (top of the likely range): ${n(t.safety)}.`);
     }
     const crit = slot.querySelector("[data-crit]");
     crit.textContent = String(d.n_critical_deficit);
     crit.closest(".res-stat").classList.toggle("is-zero", d.n_critical_deficit === 0);
-    slot.querySelector("[data-crit-line]").textContent = d.n_critical_deficit
-      ? "High/Critical wards can't be fully supplied"
-      : "Every High/Critical ward is fully supplied";
-    slot.querySelector("[data-warn]").textContent = `${d.n_warning} lower-risk warning${d.n_warning === 1 ? "" : "s"} · ${d.crews.wards_short} wards short of crews`;
+    slot.querySelector("[data-crit-line]").textContent = d.n_warning
+      ? `+ ${d.n_warning} warning${d.n_warning === 1 ? "" : "s"} (lower risk)` : d.n_critical_deficit ? "" : "All covered";
   }
 
   function renderAlerts(d) {
     const box = root.querySelector("[data-alerts]");
-    root.querySelector("[data-alerts-sub]").textContent = d.alerts.length
-      ? `${d.n_critical_deficit} critical, ${d.n_warning} warning${d.n_warning === 1 ? "" : "s"}, in priority order`
-      : "No ward is short of any supply";
+    root.querySelector("[data-alerts-sub]").textContent = d.alerts.length ? "In priority order" : "";
     if (!d.alerts.length) {
-      box.innerHTML = `<p class="res-ok">All ${d.n_wards} wards get 100% of saline, kits and beds at ${d.stock_pct}% stock.</p>`;
+      box.innerHTML = `<p class="res-ok">No ward is short.</p>`;
       return;
     }
     const MAX = 8;
@@ -179,15 +175,15 @@ export function mountResources(root, st) {
       <li class="alert tier-${a.tier}">
         <span class="flag ${FLAG_CLS[a.level]}">${esc(a.level)}</span>
         <span class="alert__w"><b>${esc(a.label)}</b> <span>${esc(a.city)} · #${a.priority} · ${esc(a.tier)}</span></span>
-        <span class="alert__s">${a.short.map((x) => `${esc(x.supply)} <b class="num">${x.allocated}/${x.required}</b>`).join(" · ")}</span>
+        <span class="alert__s">${a.short.map((x) => `${esc(SHORT[x.supply] || x.supply)} <b class="num">${x.allocated}/${x.required}</b>`).join(" · ")}</span>
       </li>`).join("")}</ul>` +
-      (d.alerts.length > MAX ? `<p class="res-more">+${d.alerts.length - MAX} more in the plan below</p>` : "");
+      (d.alerts.length > MAX ? `<p class="res-more">+${d.alerts.length - MAX} more in the plan</p>` : "");
   }
 
   function covCell(s, critical) {
     if (!s.required) return `<td class="cov cov--none"><span>–</span></td>`;
     const cls = s.coverage >= 1 ? "cov--full" : critical ? "cov--crit" : "cov--part";
-    return `<td class="cov ${cls}" title="Allocated ${s.allocated} of ${s.required} (${pc(s.coverage)}). Safety stock ${s.safety}.">
+    return `<td class="cov ${cls}" title="Getting ${s.allocated} of ${s.required} needed (${pc(s.coverage)}). Bad week: ${s.safety}.">
       <span class="cov__lane"><i style="width:${Math.min(100, s.coverage * 100)}%"></i></span>
       <span class="cov__txt num">${s.allocated}<span>/${s.required}</span></span></td>`;
   }
@@ -200,8 +196,9 @@ export function mountResources(root, st) {
         <thead><tr>
           <th scope="col" class="r">#</th><th scope="col">Ward</th><th scope="col">Risk</th>
           <th scope="col" class="r">Cases</th>
-          ${d.supplies.map((s) => `<th scope="col">${esc(s.label)}</th>`).join("")}
-          <th scope="col" class="r">Crews</th><th scope="col">Status</th>
+          ${d.supplies.map((s) => `<th scope="col">${esc(SHORT[s.key])}<small>getting / need</small></th>`).join("")}
+          <th scope="col" class="r">Crews<small>assigned / need</small></th>
+          <th scope="col">Status ${info("Supplies only. Crews are in the Crews column.")}</th>
         </tr></thead>
         <tbody>${d.wards.map((w) => {
           const hi = w.tier === "High" || w.tier === "Critical";
@@ -212,7 +209,7 @@ export function mountResources(root, st) {
             <td><span class="tier tier--sm tier-${w.tier}">${w.tier}</span></td>
             <td class="r num" title="Likely ${Math.round(w.low_80)}–${Math.ceil(w.high_80)} · density weight ×${fmt(w.density_weight, 2)}">${fmt(w.expected)}</td>
             ${d.supplies.map((s) => covCell(w.supplies[s.key], hi)).join("")}
-            <td class="r num ${w.crews_assigned < w.crews_needed ? "txt-crit" : ""}">${w.crews_needed ? `${w.crews_assigned}/${w.crews_needed}` : "–"}</td>
+            <td class="r num${w.crews_assigned < w.crews_needed ? ' txt-warn" title="Fewer crews than needed' : ""}">${w.crews_needed ? `${w.crews_assigned}/${w.crews_needed}` : "–"}</td>
             <td>${w.flag ? `<span class="flag ${FLAG_CLS[w.flag]}">${esc(w.flag)}</span>` : '<span class="flag flag--ok">Covered</span>'}</td>
           </tr>`;
         }).join("")}</tbody>

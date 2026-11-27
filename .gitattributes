@@ -1,0 +1,21 @@
+# Line endings: text files are stored with LF in the repo whatever the local core.autocrlf setting.
+# Added without renormalising: files already committed keep their stored bytes.
+* text=auto
+
+*.py   text eol=lf
+*.js   text eol=lf
+*.css  text eol=lf
+*.html text eol=lf
+*.md   text eol=lf
+*.json text eol=lf
+*.csv  text eol=lf
+*.txt  text eol=lf
+
+*.woff2  binary
+*.joblib binary
+*.png    binary
+*.ico    binary
+*.pdf    binary
+
+# Phase 1 data file committed with CRLF: keep its stored bytes (no renormalisation).
+data/raw/dengue.csv -text

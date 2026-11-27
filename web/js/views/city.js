@@ -9,7 +9,7 @@ export function mountCity(root, st) {
   const meta = getMeta();
   root.innerHTML = `
     <header class="pagehead"><div>
-      <div class="crumbs"><span>City overview</span></div>
+      <div class="crumbs"><span>City</span></div>
       <h1 data-title>&nbsp;</h1>
       <p data-sub>&nbsp;</p>
     </div></header>
@@ -18,12 +18,12 @@ export function mountCity(root, st) {
       <div class="need-slot"><div class="skel skel--big" style="width:50%"></div><div class="skel skel--line" style="height:12px"></div></div>
     </section>
     <section class="card" aria-labelledby="rank-t">
-      ${cardHead("Where to send teams first", "Expected cases in the forecast week, highest first. Select a ward to open it.",
-        "High and Critical wards need action. The likely range covers 8 in 10 weeks.").replace("<h2>", '<h2 id="rank-t">')}
+      ${cardHead("Where to send teams first", "",
+        "Expected cases in the forecast week, highest first; High and Critical risk wards need action. Select a ward to open it.").replace("<h2>", '<h2 id="rank-t">')}
       <div class="rank-slot">${'<div class="skel skel--line" style="height:22px;margin:14px 0"></div>'.repeat(6)}</div>
     </section>
     <section class="card" aria-labelledby="heat-t">
-      <div class="card__head"><div><h2 id="heat-t">Risk through the year</h2><p>Forecast risk for every ward and week</p></div>
+      <div class="card__head"><div><h2 id="heat-t">Risk through the year</h2></div>
         <div class="right"><div class="select-sm" data-year></div></div></div>
       <div class="chart" data-heat role="img"></div>
       <div class="legend" data-heat-legend></div>
@@ -36,7 +36,7 @@ export function mountCity(root, st) {
     onChange: (v) => setState({ h: Number(v) }) });
   const stepper = weekStepper({ value: st.date, min: meta.min_date, max: meta.max_date, onChange: (v) => setState({ date: v, year: 0 }) });
   bar.append(field("City", cityBox.el), field("Weeks ahead", hSeg.el, { cls: "field--h" }),
-             field("Data up to", stepper.el, { cls: "field--date", tip: "The forecast only uses weather up to this week." }));
+             field("Data up to", stepper.el, { cls: "field--date", tip: "Forecasts use data up to this week." }));
 
   const years = [...meta.years].reverse();
   const yearBox = combobox({ label: "Year", options: years.map((y) => ({ value: y, label: String(y) })), value: years[0],
@@ -89,13 +89,13 @@ export function mountCity(root, st) {
   function renderCity(d) {
     root.querySelector("[data-title]").textContent = d.city;
     root.querySelector("[data-sub]").innerHTML =
-      `Week of <b>${day(d.target_date, true)}</b> · ${d.horizon} weeks ahead · data up to ${day(d.issue_date)}`;
+      `Week of <b>${day(d.target_date, true)}</b>`;
 
     // headline + tier mix
     const slot = root.querySelector(".need-slot");
     if (!slot.querySelector("[data-need]")) {
       slot.innerHTML = `<div class="headline"><b class="fig"><span data-need>0</span><span> of <span data-all></span></span></b>
-        <p>wards need action before <strong data-by></strong></p></div>
+        <p>wards need action</p><strong data-by hidden></strong></div>
         <div class="mix" role="img" data-mix></div><div class="legend" data-mixlegend></div>`;
     }
     countUp(slot.querySelector("[data-need]"), d.need_action, { decimals: 0, duration: 800 });
@@ -112,7 +112,7 @@ export function mountCity(root, st) {
     const top = Math.max(...d.wards.map((w) => w.expected), 1) * 1.05;
     const half = Math.ceil(d.wards.length / 2);
     const colHtml = (ws) => `<div class="rank-col" role="list">
-      <div class="rank-head" aria-hidden="true"><span>#</span><span>Ward</span><span>Expected cases</span><span></span><span>Range</span><span>Risk</span></div>
+      <div class="rank-head" aria-hidden="true"><span>#</span><span>Ward</span><span>Cases</span><span></span><span>Likely</span><span>Risk</span></div>
       ${ws.map((w, i) => `<button type="button" role="listitem" class="rank tier-${w.tier}" data-ward="${esc(w.ward)}"
           aria-label="${w.rank}. ${esc(w.label)}: ${fmt(w.expected)} cases expected, likely ${Math.round(w.low_80)} to ${Math.ceil(w.high_80)}, ${w.tier} risk. Open ward.">
         <span class="rank__n">${w.rank}</span><span class="rank__w">${esc(w.label)}</span>

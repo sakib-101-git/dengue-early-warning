@@ -6,6 +6,8 @@ refuse any host that is not this machine. The server state is rebuilt from scrat
 cache is cleared under the block, so each endpoint really computes offline. Attempts are also
 recorded, so a library that swallows the error still fails the test.
 """
+import hashlib
+import json
 import re
 import socket
 from pathlib import Path
@@ -124,15 +126,23 @@ def own_web_files():
     return sorted(p for p in WEB.rglob("*") if p.is_file() and p.suffix in {".html", ".js", ".css", ".svg", ".woff2"})
 
 
+# index.html is served with version stamps (?v=<hash> and an import map); removing them gives the file back
+STAMPS = re.compile(rb'<script type="importmap">.*?</script>|\?v=[0-9a-f]{10}')
+
+
 def test_every_ui_file_is_served_offline(offline):
     client, _ = offline
     files = own_web_files()
     assert any(p.name == "echarts.min.js" for p in files) and any(p.suffix == ".woff2" for p in files)
-    for p in files:
+    for p in files:                                        # raw bytes: holds with core.autocrlf=true too
         rel = p.relative_to(WEB).as_posix()
+        if rel == "index.html":
+            continue
         r = client.get("/" + rel)
         assert r.status_code == 200 and r.content == p.read_bytes(), rel
-    assert client.get("/").text == (WEB / "index.html").read_text(encoding="utf-8")
+    for path in ("/", "/index.html"):
+        r = client.get(path)
+        assert r.status_code == 200 and STAMPS.sub(b"", r.content) == (WEB / "index.html").read_bytes(), path
 
 
 # ---------------------------------------------------------------- static guards (no network in the code)
@@ -171,6 +181,79 @@ def test_app_files_revalidate_every_load(offline, path):
     assert r.headers.get("etag") and r.headers.get("last-modified")
     again = client.get(path, headers={"If-None-Match": r.headers["etag"]})
     assert again.status_code == 304                       # cheap revalidation, never a stale copy
+
+
+def short_hash(p: Path) -> str:
+    return hashlib.sha256(p.read_bytes()).hexdigest()[:10]
+
+
+def served_index(client):
+    html = client.get("/").text
+    css = re.search(r'<link rel="stylesheet" href="([^"]+)">', html).group(1)
+    entry = re.search(r'<script type="module" src="([^"]+)"></script>', html).group(1)
+    imap = json.loads(re.search(r'<script type="importmap">(.*?)</script>', html).group(1))["imports"]
+    return html, css, entry, imap
+
+
+def test_index_loads_every_app_file_by_content_hash(offline):
+    """A browser can't pair a new page with an old stylesheet or module: changed bytes = new URL."""
+    client, _ = offline
+    html, css, entry, imap = served_index(client)
+    assert css == f"styles.css?v={short_hash(WEB / 'styles.css')}"
+    assert entry == f"js/app.js?v={short_hash(WEB / 'js' / 'app.js')}"
+    modules = sorted(p.relative_to(WEB).as_posix() for p in (WEB / "js").rglob("*.js"))
+    assert sorted(k[2:] for k in imap) == modules                       # every module, nothing else
+    for key, url in imap.items():
+        rel = key[2:]
+        assert url == f"./{rel}?v={short_hash(WEB / rel)}"
+        r = client.get(url[1:])
+        assert r.status_code == 200 and r.content == (WEB / rel).read_bytes(), url
+    assert re.search(r'src="vendor/echarts\.min\.js"', html)           # vendored URLs stay plain (cacheable)
+    assert html.index('type="importmap"') < html.index('type="module"')  # the map must precede any module
+
+
+IMPORT = re.compile(r"""(?:\bfrom\s*|\bimport\s*\(?\s*)["']([^"']+)["']""")
+
+
+@pytest.mark.parametrize("path", sorted((WEB / "js").rglob("*.js")), ids=lambda p: p.relative_to(WEB).as_posix())
+def test_module_imports_resolve_through_the_import_map(offline, path):
+    """Imports are plain relative paths (no hand-written ?v=) and each one is pinned by the import map."""
+    client, _ = offline
+    *_, imap = served_index(client)
+    for spec in IMPORT.findall(path.read_text(encoding="utf-8")):
+        assert spec.startswith(".") and "?" not in spec, f"{path.name}: {spec}"
+        target = (path.parent / spec).resolve().relative_to(WEB.resolve()).as_posix()
+        assert f"./{target}" in imap, f"{path.name} imports {spec}, not in the import map"
+
+
+def test_version_changes_when_a_file_changes(tmp_path):
+    (tmp_path / "js").mkdir()
+    (tmp_path / "index.html").write_bytes(b'<link rel="stylesheet" href="styles.css">\n'
+                                          b'<script type="module" src="js/app.js"></script>\n')
+    (tmp_path / "styles.css").write_bytes(b".a{}")
+    (tmp_path / "js" / "app.js").write_bytes(b'import "./x.js";')
+    (tmp_path / "js" / "x.js").write_bytes(b"1")
+    before = api.render_index(tmp_path)
+    (tmp_path / "styles.css").write_bytes(b".a{color:red}")
+    (tmp_path / "js" / "x.js").write_bytes(b"22")
+    after = api.render_index(tmp_path)
+    v0, v1 = api.asset_versions(tmp_path), before != after
+    assert v1 and re.search(r"styles\.css\?v=(\w+)", before).group(1) != re.search(r"styles\.css\?v=(\w+)", after).group(1)
+    assert '"./js/x.js":"./js/x.js?v=' in after and v0["js/app.js"] in after   # unchanged file keeps its hash
+
+
+def test_index_without_known_entry_points_is_refused(tmp_path):
+    (tmp_path / "index.html").write_bytes(b"<html></html>")
+    (tmp_path / "styles.css").write_bytes(b"")
+    with pytest.raises(RuntimeError):
+        api.render_index(tmp_path)
+
+
+def test_tooltips_are_hidden_without_css():
+    """Tooltip text is `hidden` in the markup, so a missing or stale stylesheet never shows it inline."""
+    ui = (WEB / "js" / "ui.js").read_text(encoding="utf-8")
+    assert re.search(r'<span class="info__tip" role="tooltip" id="\$\{id\}" hidden>', ui)
+    assert "tip.hidden = !show" in ui
 
 
 @pytest.mark.parametrize("path", ["/vendor/echarts.min.js", "/vendor/fonts/Geist-Variable.woff2"])

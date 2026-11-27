@@ -6,7 +6,6 @@ import { combobox, day, errorBox, esc, field, info, segmented, weekStepper } fro
 
 const TABS = [{ value: "sms", label: "SMS" }, { value: "whatsapp", label: "WhatsApp" }, { value: "brief", label: "Brief" }];
 const PLANS = [{ value: "alloc", label: "Allocated crews" }, { value: "sim", label: "Simulator plan" }, { value: "off", label: "Off" }];
-const pc = (v) => `${Math.round(v * 100)}%`;
 
 // ---- GSM-7 counter (same rules as src/dispatch.py: 160 / 153 septets, ext chars count 2; UCS-2 70 / 67)
 const GSM_BASIC = new Set("@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ !\"#¤%&'()*+,-./0123456789:;<=>?¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyzäöñüà");
@@ -27,7 +26,6 @@ const waHtml = (t) => esc(t).replace(/\*([^*\n]+)\*/g, "<b>$1</b>").replace(/(^|
 
 // Plain-language numbers, same rules as src/dispatch.py: whole cases, "fewer than 1" below 1.
 const whole = (x) => Math.floor(Number(x) + 0.5);
-const casesWord = (x) => (x < 1 ? "fewer than 1 case" : `about ${whole(x)} case${whole(x) === 1 ? "" : "s"}`);
 const rangeWord = (lo, hi) => (whole(hi) < 1 ? "" : whole(lo) < 1 ? `up to ${whole(hi)}` : whole(lo) === whole(hi) ? "" : `likely ${whole(lo)} to ${whole(hi)}`);
 const SUPPLY_NAME = { saline: "Saline bags", kits: "Test kits", beds: "Extra (surge) beds" };
 
@@ -64,16 +62,15 @@ export function mountDispatch(root, st) {
     </section>
     <div class="dsp-split">
       <section class="card dsp-main" aria-labelledby="dsp-t">
-        <div class="card__head"><div><h2 id="dsp-t">Notice</h2><p data-tab-sub>&nbsp;</p></div><div class="right" data-tabs></div></div>
+        <div class="card__head"><div><h2 id="dsp-t">Notice</h2><p data-tab-sub></p></div>
+          <div class="right"><span data-tabs></span>${info("Built offline from fixed templates, no AI. SMS aims for 160 characters; for a PDF use Print brief, then Save as PDF.")}</div></div>
         <div data-panel><div class="skel skel--block" style="height:260px"></div></div>
       </section>
       <aside class="card dsp-side" aria-labelledby="dsp-s">
-        <div class="card__head"><div><h2 id="dsp-s">In this notice</h2><p>The same numbers as Resources and Hospitals</p></div></div>
+        <div class="card__head"><div><h2 id="dsp-s">Summary</h2></div></div>
         <div data-side></div>
       </aside>
-    </div>
-    <p class="res-foot">Notices are built from fixed templates on this server, with no AI model and no internet. Text messages use
-      plain characters and aim for 1 SMS (160 characters), never more than 2. The brief prints on A4: use <b>Print brief</b> and choose <b>Save as PDF</b>.</p>`;
+    </div>`;
 
   // ---- toolbar
   const bar = root.querySelector(".toolbar");
@@ -93,7 +90,7 @@ export function mountDispatch(root, st) {
 
   const planSeg = segmented({ label: "Crew impact", items: PLANS, value: st.dplan, onChange: (v) => setState({ dplan: v }, { push: false }) });
   root.querySelector("[data-plan]").append(
-    Object.assign(document.createElement("div"), { className: "label", innerHTML: `Crew impact${info("Adds the simulator's model counterfactual (cases prevented over 2–4 weeks) for the crews Resources assigned, or for your Simulator plan.")}` }),
+    Object.assign(document.createElement("div"), { className: "label", innerHTML: `Crew impact${info("Adds the Simulator's model estimate of cases prevented over 2–4 weeks, for the crews Resources assigned or your Simulator plan.")}` }),
     planSeg.el);
 
   const tabSeg = segmented({ label: "Channel", items: TABS, value: st.tab, onChange: (v) => setState({ tab: v }, { push: false }) });
@@ -132,8 +129,7 @@ export function mountDispatch(root, st) {
     const c = data.context;
     const ward = data.scope === "ward";
     root.querySelector("[data-title]").textContent = ward ? `${c.name}` : `${c.city} brief`;
-    root.querySelector("[data-sub]").innerHTML =
-      `${ward ? `${esc(c.city)} · ` : ""}Week of <b>${day(c.target_date, true)}</b> · ${c.horizon} weeks ahead · data up to ${day(c.issue_date)}`;
+    root.querySelector("[data-sub]").innerHTML = `${ward ? `${esc(c.city)} · ` : ""}Week of <b>${day(c.target_date, true)}</b>`;
     const se = c.settings;
     const chip = (label, val, view, title) =>
       `<a class="dsp-chip" href="?view=${view}" data-go="${view}" title="${esc(title)}"><span>${esc(label)}</span><b>${esc(val)}</b></a>`;
@@ -147,34 +143,30 @@ export function mountDispatch(root, st) {
     renderPanel(s);
   }
 
+  // Compact summary only: the full story (alerts, beds, crews, actions) is in the notice itself.
   function renderSide(c) {
     const ward = data.scope === "ward";
-    // Alert text = the plain sentence after the official flag word (the flag itself is the badge).
-    const plain = (a) => { const s = a.plain.slice(a.label.length + 2); return s.charAt(0).toUpperCase() + s.slice(1); };
-    const alerts = ward ? c.alerts.map((a) => ({ ...a, text: plain(a) }))
-      : c.wards.flatMap((w) => w.alerts.map((a) => ({ ...a, text: `${w.name}: ${plain(a)}` })));
-    const sup = c.supplies.map((s) => `<li><span>${SUPPLY_NAME[s.key]}</span><span class="num${s.deficit ? " txt-crit" : ""}">${s.required} / ${s.allocated}</span>
-      <span class="cov${s.coverage >= 1 ? " cov--full" : " cov--crit"}"><span class="cov__lane"><i style="width:${Math.min(100, s.coverage * 100)}%"></i></span><span class="cov__txt num">${pc(s.coverage)}</span></span></li>`).join("");
-    const actions = c.actions.slice(0, 3).map((a) => a.text);
+    const flags = ward ? [...new Map(c.alerts.map((a) => [a.label, a.level])).entries()]
+      : (() => { const n = c.wards.filter((w) => w.alerts.length).length; return n ? [[`${n} ward${n === 1 ? "" : "s"} short`, "WARNING"]] : []; })();
+    const flagHtml = flags.length
+      ? flags.map(([label, level]) => `<span class="flag ${level === "CRITICAL DEFICIT" ? "flag--crit" : "flag--warn"}">${esc(label)}</span>`).join("")
+      : '<span class="flag flag--ok">Covered</span>';
     const rng = ward ? rangeWord(c.low_80, c.high_80) : "";
-    const crews = c.crews_needed === 0 ? "None needed this week."
-      : `<b class="num">${c.crews_assigned}</b> of <b class="num">${c.crews_needed}</b> needed are assigned.` +
-        (c.sim ? ` Spraying should prevent ${casesWord(c.sim.prevented_cases)} over the next 2 to 4 weeks.` : "");
-    root.querySelector("[data-side]").innerHTML = `
-      <p class="dsp-short"><b>In short.</b> ${esc(c.summary)}</p>
-      <div class="dsp-fore">
-        ${ward ? `<span class="tier tier-${c.tier}">${c.tier} risk</span>` : `<span class="chip">${c.tiers.Critical} critical · ${c.tiers.High} high risk</span>`}
-        <b class="fig">${c.expected < 1 ? "&lt;1" : whole(c.expected)}</b><span>expected cases${ward ? (rng ? ` · ${rng}` : "") : ` across ${c.n_wards} wards`}</span>
+    const range = rng ? ` <span class="sim-muted">${rng}</span>` : "";
+    const mini = c.supplies.map((s) => `<div class="dsp-mini__row"><span>${SUPPLY_NAME[s.key]}</span>
+        <span class="num">${s.required}</span><span class="num">${s.allocated}</span>
+        <span class="num${s.deficit ? " txt-crit" : ""}">${s.deficit || "–"}</span></div>`).join("");
+    root.querySelector("[data-side]").innerHTML = `<div class="dsp-sum">
+      <div class="dsp-sum__flags">${ward ? `<span class="tier tier-${c.tier}">${c.tier} risk</span>` : ""}${flagHtml}</div>
+      <dl class="dsp-sum__kv">
+        <dt>Cases</dt><dd><b class="fig">${c.expected < 1 ? "&lt;1" : whole(c.expected)}</b>${range}${ward ? "" : ` <span class="sim-muted">in ${c.n_wards} wards</span>`}</dd>
+        <dt>Act by</dt><dd>${day(c.deadline, true)}</dd>
+      </dl>
+      <div class="dsp-mini" role="table" aria-label="Supplies">
+        <div class="dsp-mini__row dsp-mini__head" role="row"><span></span><span>Need</span><span>Getting</span><span>Short</span></div>
+        ${mini}
       </div>
-      <h3 class="dsp-h">Supplies: need / getting</h3><ul class="dsp-sup">${sup}</ul>
-      <h3 class="dsp-h">Alerts</h3>
-      ${alerts.length ? `<ul class="dsp-alerts">${alerts.slice(0, 6).map((a) => `<li><span class="flag ${a.level === "CRITICAL DEFICIT" ? "flag--crit" : "flag--warn"}">${esc(a.label)}</span><span>${esc(a.text)}</span></li>`).join("")}${alerts.length > 6 ? `<li class="res-more">+${alerts.length - 6} more in the brief</li>` : ""}</ul>`
-        : '<p class="res-ok">No shortages: every supply is covered and every patient has a bed.</p>'}
-      ${c.bed_story ? `<h3 class="dsp-h">Hospital beds</h3><p class="dsp-crews">${esc(c.bed_story)}</p>` : ""}
-      <h3 class="dsp-h">Spraying crews</h3>
-      <p class="dsp-crews">${crews}</p>
-      <h3 class="dsp-h">What to do by ${day(c.deadline)}</h3>
-      <ol class="dsp-acts">${actions.map((a) => `<li>${esc(a)}</li>`).join("")}</ol>`;
+    </div>`;
   }
 
   function counter(text) {
@@ -189,25 +181,25 @@ export function mountDispatch(root, st) {
     if (!data) return;
     const box = root.querySelector("[data-panel]");
     const files = data.files;
-    const btns = (extra = "") => `<div class="dsp-actions">${extra}<button type="button" class="btn btn--sm" data-copy>Copy</button>` +
+    const btns = (extra = "") => `<div class="dsp-actions">${extra}<button type="button" class="btn btn--sm" data-copy>Copy text</button>` +
       `<button type="button" class="btn btn--sm" data-dl>Download .${s.tab === "brief" ? "html" : "txt"}</button><span class="dsp-done" role="status" aria-live="polite"></span></div>`;
     const sub = root.querySelector("[data-tab-sub]");
     if (s.tab === "sms") {
-      sub.textContent = "Edit before sending. The counter updates as you type.";
+      sub.textContent = "Editable before sending";
       const text = smsDraft ?? data.sms;
       box.innerHTML = `<div class="dsp-phone"><label class="sr-only" for="dsp-sms">SMS text</label>
         <textarea id="dsp-sms" class="dsp-bubble dsp-bubble--sms" rows="6" spellcheck="false">${esc(text)}</textarea></div>
-        <p class="dsp-count" data-count>${counter(text)}</p>` + btns(smsDraft !== null ? '<button type="button" class="btn btn--sm" data-reset>Reset</button>' : "");
+        <p class="dsp-count" data-count>${counter(text)}</p>` + btns(smsDraft !== null ? '<button type="button" class="btn btn--sm" data-reset>Undo edits</button>' : "");
       const ta = box.querySelector("textarea");
       ta.addEventListener("input", () => {
         smsDraft = ta.value === data.sms ? null : ta.value;
         box.querySelector("[data-count]").innerHTML = counter(ta.value);
       });
     } else if (s.tab === "whatsapp") {
-      sub.textContent = "Preview as it looks in WhatsApp. Copy keeps the *bold* marks.";
+      sub.textContent = "";
       box.innerHTML = `<div class="dsp-phone dsp-phone--wa"><div class="dsp-bubble dsp-bubble--wa">${waHtml(data.whatsapp)}</div></div>` + btns();
     } else {
-      sub.textContent = data.scope === "ward" ? "One-page ward brief, A4" : "City brief, A4: the wards that need action first";
+      sub.textContent = data.scope === "ward" ? "A4 · one page" : "A4 · city brief";
       box.innerHTML = `<iframe class="dsp-brief" title="Brief preview"></iframe>` +
         btns('<button type="button" class="btn btn--sm btn--primary" data-print>Print brief</button>' +
           `<label class="dsp-check"><input type="checkbox" data-method${methodOn(s) ? " checked" : ""}> Include method page</label>`);
