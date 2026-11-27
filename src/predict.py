@@ -127,14 +127,29 @@ class RiskEngine:
         grouped = grouped.reindex(grouped["log_effect"].abs().sort_values(ascending=False).index)
         return float(np.exp(base_log)), grouped, raw.sort_values("log_effect", key=abs, ascending=False)
 
+    def feature_rows(self, issue_date, h: int) -> pd.DataFrame:
+        """Model-ready feature rows of every ward at one issue week (sorted by ward)."""
+        b, fr = self.bundles[h], self._frames[h]
+        rows = fr[fr.date == pd.Timestamp(issue_date)].dropna(subset=b["features"])
+        if rows.empty:
+            raise KeyError(f"No feature rows at {issue_date} for h={h}")
+        return rows.sort_values("ward_id")
+
     # ------------------------------------------------------------------ what-if
     def what_if_frame(self, ward: str, issue_date, h: int, rain_pct: float = 0.0,
-                      temp_delta: float = 0.0, humidity_delta: float = 0.0, weeks: int = 4):
-        """Rebuild ONE ward's features after changing the last `weeks` weeks of weather."""
+                      temp_delta: float = 0.0, humidity_delta: float = 0.0, weeks: int = 4,
+                      waterlog_pct: float = 0.0):
+        """Rebuild ONE ward's features after changing the last `weeks` weeks of weather.
+
+        waterlog_pct cuts the ward's water_logging_risk_index by that % in the same window
+        (vector control: crews removing breeding sites; see src/simulator.py).
+        """
         w = self.raw[self.raw.ward_id == ward].copy()
         t = pd.Timestamp(issue_date)
         win = (w.date <= t) & (w.date > t - pd.Timedelta(weeks=weeks))
         w.loc[win, "rainfall_mm"] *= 1 + rain_pct / 100
+        if waterlog_pct:
+            w.loc[win, "water_logging_risk_index"] *= 1 - waterlog_pct / 100
         for c in ("avg_temp_c", "max_temp_c", "min_temp_c"):
             w.loc[win, c] += temp_delta
         w.loc[win, "relative_humidity_pct"] = (w.loc[win, "relative_humidity_pct"] + humidity_delta).clip(0, 100)

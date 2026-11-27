@@ -18,7 +18,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import Body, FastAPI, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -27,6 +27,7 @@ from src.config import HORIZONS, METRICS_JSON, TEST_YEARS, TIER_LABELS
 from src.predict import BREEDING, OLDER, RiskEngine
 from src import hospitals as hosp
 from src import resources as res
+from src import simulator as sim
 
 log = logging.getLogger("dengue_watch")
 WEB_DIR = Path(__file__).resolve().parents[1] / "web"
@@ -113,6 +114,8 @@ class State:
         self.engine = RiskEngine()
         self.tables = {h: self.engine.forecast_table(h) for h in HORIZONS}
         self.weeks = {h: sorted(pd.to_datetime(t.issue_date.unique())) for h, t in self.tables.items()}
+        # the simulator forecasts h = 2, 3 and 4 at once, so it needs weeks valid at every horizon
+        self.sim_weeks = sorted(set.intersection(*(set(w) for w in self.weeks.values())))
         raw = self.engine.raw
         self.cities = sorted(raw.city.unique())
         self.wards = {c: sorted(raw.loc[raw.city == c, "ward_id"].unique()) for c in self.cities}
@@ -491,6 +494,167 @@ def overflow(city: str = "all", date: Date | None = None, h: int = 3, capacity_p
     if basis not in hosp.BASES:
         raise HTTPException(400, f"basis must be one of {', '.join(hosp.BASES)} (got '{basis}').")
     return _overflow_payload(city, S().snap(h, date), h, capacity_pct, basis)
+
+
+# ---------------------------------------------------------------- Phase 2: vector control simulator
+MAX_CREWS_TOTAL = 1000
+
+
+def snap_sim(d: Date | None) -> pd.Timestamp:
+    """Latest issue week <= d that has forecasts at every horizon, clamped to the valid range."""
+    weeks = S().sim_weeks
+    t = pd.Timestamp(DEFAULTS["date"]) if d is None else pd.Timestamp(d)
+    i = bisect.bisect_right(weeks, t) - 1
+    return weeks[min(max(i, 0), len(weeks) - 1)]
+
+
+def scope_wards(scope: str) -> tuple[str, ...]:
+    s = S()
+    return tuple(sorted(s.ward_city)) if scope == "all" else tuple(s.wards[scope])
+
+
+def parse_crews(value) -> tuple[tuple[str, int], ...]:
+    """Crew plan from JSON ({"DNCC_Ward_01": 2}) or compact text ("DNCC_Ward_01:2,DSCC_Ward_03:1")."""
+    if value is None or value == "":
+        return ()
+    obj = value
+    if isinstance(value, str):
+        txt = value.strip()
+        if txt.startswith("{"):
+            try:
+                obj = json.loads(txt)
+            except ValueError:
+                raise HTTPException(400, "crews must be JSON like {\"DNCC_Ward_01\": 2} or text like DNCC_Ward_01:2.")
+        else:
+            obj = {}
+            for part in filter(None, (p.strip() for p in txt.split(","))):
+                w, sep, n = part.partition(":")
+                if not sep:
+                    raise HTTPException(400, f"crews: '{part}' should look like DNCC_Ward_01:2.")
+                obj[w.strip()] = n.strip()
+    if not isinstance(obj, dict):
+        raise HTTPException(400, "crews must map ward ids to crew counts.")
+    out: dict[str, int] = {}
+    for w, n in obj.items():
+        check_ward(str(w))
+        try:
+            if isinstance(n, bool) or (isinstance(n, float) and not n.is_integer()):
+                raise ValueError
+            n = int(n)
+        except (TypeError, ValueError):
+            raise HTTPException(400, f"Crews for {w} must be a whole number (got {n!r}).")
+        check_range(f"Crews for {w}", n, 0, sim.MAX_CREWS_PER_WARD)
+        if n:
+            out[str(w)] = n
+    if sum(out.values()) > MAX_CREWS_TOTAL:
+        raise HTTPException(400, f"At most {MAX_CREWS_TOTAL} crews in total.")
+    return tuple(sorted(out.items()))
+
+
+@lru_cache(maxsize=64)
+def _curves(issue: pd.Timestamp, effect: int) -> sim.Curves:
+    """All wards x h2-h4 x crew levels for one issue week: one batched model run, then lookups."""
+    return sim.Curves(sim.response_curves(S().engine, issue, effect), effect)
+
+
+def sim_point_json(p: dict) -> dict:
+    return {"cases": num(p["cases"]), "low_80": num(p["low_80"]), "high_80": num(p["high_80"]), "tier": p["tier"],
+            **{k: int(p[k]) for k in sim.SIM_SUPPLIES}}
+
+
+def sim_common(scope: str, issue: pd.Timestamp, effect: int, cv: sim.Curves) -> dict:
+    return {"scope": scope, "scope_label": "All cities" if scope == "all" else scope, "issue_date": iso(issue),
+            "effect_pct": effect, "cap_pct": round(sim.CAP * 100), "max_useful_crews": cv.max_crews,
+            "horizons": [{"h": int(h), "target_date": iso(cv.target_dates[int(h)])} for h in cv.horizons],
+            "method": sim.METHOD}
+
+
+@lru_cache(maxsize=256)
+def _simulate_payload(scope: str, issue: pd.Timestamp, effect: int, crews: tuple, auto: int | None) -> dict:
+    rates = need_rates()
+    cv = _curves(issue, effect)
+    pool = list(scope_wards(scope))
+    plan = sim.auto_deploy(cv, auto, pool) if auto is not None else dict(crews)
+    r = sim.simulate(cv, plan, rates, pool)
+    wards = [{
+        "ward": w["ward_id"], "label": short_ward(w["ward_id"]), "city": w["city"], "crews": w["crews"],
+        "effective_crews": w["effective_crews"], "reduction": num(w["reduction"], 4),
+        "tier": w["tier"], "tier_after": w["tier_after"], "roi": num(w["roi"], 3),
+        "prevented": {"cases": num(w["prevented"]["cases"], 3), **{k: int(w["prevented"][k]) for k in sim.SIM_SUPPLIES}},
+        "horizons": [{"h": x["h"], "target_date": iso(x["target_date"]), "baseline": sim_point_json(x["baseline"]),
+                      "scenario": sim_point_json(x["scenario"]),
+                      "prevented": {"cases": num(x["prevented"]["cases"], 3),
+                                    **{k: int(x["prevented"][k]) for k in sim.SIM_SUPPLIES}}} for x in w["horizons"]],
+    } for w in r["wards"]]
+    by_h = [{k: (iso(v) if k == "target_date" else num(v, 3) if "cases" in k else v) for k, v in row.items()}
+            for row in r["by_horizon"]]
+    deployed = r["crews_deployed"]
+    return {
+        **sim_common(scope, issue, effect, cv),
+        "mode": "auto" if auto is not None else "manual", "auto_requested": auto,
+        "crews": dict(sorted(plan.items())), "crews_deployed": deployed, "wards_deployed": r["wards_deployed"],
+        "crews_spare": (auto - deployed) if auto is not None else 0,
+        "totals": {"by_horizon": by_h,
+                   "prevented": {"cases": num(r["prevented"]["cases"], 3), **{k: int(r["prevented"][k]) for k in sim.SIM_SUPPLIES}},
+                   "roi": num(r["roi"], 3), "scope_baseline_cases": num(r["scope_baseline_cases"], 2),
+                   "share_of_scope": num(r["share_of_scope"], 4)},
+        "wards": wards,
+        "rates": {k: rates["supplies"][k]["k"] for k in sim.SIM_SUPPLIES},
+    }
+
+
+def check_effect(effect: int) -> int:
+    return check_range("effect", effect, *sim.EFFECT_RANGE)
+
+
+def check_auto(auto: int | None) -> int | None:
+    return None if auto is None else check_range("auto", auto, 0, MAX_CREWS_TOTAL)
+
+
+@app.get("/api/simulate")
+def simulate_get(scope: str = "all", date: Date | None = None, effect: int = sim.EFFECT_DEFAULT,
+                 crews: str = "", auto: int | None = None):
+    """Crew plan as ?crews={"DNCC_Ward_01":2} (or DNCC_Ward_01:2,...), or ?auto=N for greedy auto-deploy."""
+    scope = check_scope(scope)
+    return _simulate_payload(scope, snap_sim(date), check_effect(effect), parse_crews(crews), check_auto(auto))
+
+
+@app.post("/api/simulate")
+def simulate_post(body: dict = Body(default_factory=dict)):
+    """Same as GET, with a JSON body: {"crews": {ward_id: crews}, "date", "effect", "scope", "auto"}."""
+    scope = check_scope(str(body.get("scope", "all")))
+    d = body.get("date")
+    try:
+        day = Date.fromisoformat(str(d)) if d else None
+    except ValueError:
+        raise HTTPException(400, "date must look like 2025-07-07 (YYYY-MM-DD).")
+    try:
+        effect = int(body.get("effect", sim.EFFECT_DEFAULT))
+        auto = None if body.get("auto") is None else int(body["auto"])
+    except (TypeError, ValueError):
+        raise HTTPException(400, "effect and auto must be whole numbers.")
+    return _simulate_payload(scope, snap_sim(day), check_effect(effect), parse_crews(body.get("crews") or {}),
+                             check_auto(auto))
+
+
+@lru_cache(maxsize=128)
+def _rank_payload(scope: str, issue: pd.Timestamp, effect: int) -> dict:
+    cv = _curves(issue, effect)
+    d = sim.rank(cv, list(scope_wards(scope)))
+    return {
+        **sim_common(scope, issue, effect, cv),
+        "wards": [{"rank": int(r.rank), "ward": r.ward_id, "label": short_ward(r.ward_id), "city": r.city, "tier": r.tier,
+                   "baseline_cases": num(r.baseline_cases, 3),
+                   "baseline_by_h": {str(h): num(getattr(r, f"baseline_h{h}"), 3) for h in cv.horizons},
+                   "roi_1": num(r.roi_1, 3), "best_roi": num(r.best_roi, 3), "best_roi_crews": int(r.best_roi_crews),
+                   "prevented_max": num(r.prevented_max, 3), "crews_max": int(r.crews_max)} for r in d.itertuples()],
+    }
+
+
+@app.get("/api/simulate/rank")
+def simulate_rank(scope: str = "all", date: Date | None = None, effect: int = sim.EFFECT_DEFAULT):
+    """Every ward in scope ranked by 1-crew ROI (cases prevented over h2-h4 by one crew)."""
+    return _rank_payload(check_scope(scope), snap_sim(date), check_effect(effect))
 
 
 @app.get("/api/{rest:path}")
