@@ -1,10 +1,12 @@
 // App state <-> URL. Every view is shareable and the back button works.
-const KEYS = ["view", "city", "ward", "h", "date", "rain", "temp", "hum", "year"];
-const NUMERIC = new Set(["h", "rain", "temp", "hum", "year"]);
-const VIEWS = ["ward", "city", "model"];
+const KEYS = ["view", "city", "ward", "h", "date", "rain", "temp", "hum", "year", "scope", "stock", "crews", "floor"];
+const NUMERIC = new Set(["h", "rain", "temp", "hum", "year", "stock", "crews", "floor"]);
+const VIEWS = ["ward", "city", "model", "resources"];
+// Resources defaults: a scarce-but-workable scenario so the allocation engine has something to do.
+export const RES_DEFAULTS = { scope: "all", stock: 60, crews: 40, floor: 0 };
 
 const listeners = new Set();
-export const state = { view: "ward", city: "", ward: "", h: 3, date: "", rain: 0, temp: 0, hum: 0, year: 0 };
+export const state = { view: "ward", city: "", ward: "", h: 3, date: "", rain: 0, temp: 0, hum: 0, year: 0, ...RES_DEFAULTS };
 let meta = null;
 
 export function initState(m) {
@@ -21,7 +23,7 @@ function readUrl() {
   for (const k of KEYS) {
     if (!q.has(k)) continue;
     const v = q.get(k);
-    state[k] = NUMERIC.has(k) ? Number(v) || 0 : v;
+    state[k] = NUMERIC.has(k) ? (Number.isFinite(Number(v)) ? Number(v) : 0) : v;
   }
   sanitize();
 }
@@ -41,6 +43,10 @@ function sanitize() {
   state.temp = clamp(state.temp, -4, 4);
   state.hum = clamp(state.hum, -20, 20);
   if (state.year && !meta.years.includes(state.year)) state.year = 0;
+  if (state.scope !== "all" && !cities.includes(state.scope)) state.scope = RES_DEFAULTS.scope;
+  state.stock = state.stock ? clamp(Math.round(state.stock), 30, 100) : RES_DEFAULTS.stock;
+  state.crews = clamp(Math.round(state.crews), 0, 1000);
+  state.floor = state.floor === 20 ? 20 : 0;
 }
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, Number(v) || 0));
@@ -58,6 +64,10 @@ function toUrl() {
   if (state.view !== "model") q.set("date", state.date);
   if (state.view === "ward") for (const k of ["rain", "temp", "hum"]) if (state[k]) q.set(k, String(state[k]));
   if (state.view === "city" && state.year) q.set("year", String(state.year));
+  if (state.view === "resources") {
+    q.set("scope", state.scope); q.set("stock", String(state.stock)); q.set("crews", String(state.crews));
+    if (state.floor) q.set("floor", String(state.floor));
+  }
   return `${location.pathname}?${q}`;
 }
 

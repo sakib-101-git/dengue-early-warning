@@ -56,6 +56,14 @@ Three views, switched from the top bar; every view's settings live in the URL, s
   - Error by model and by year.
   - How a forecast is made, in 4 steps.
 
+### Phase 2: operations views
+- **Resources (constrained allocation):**
+  - Turns each ward's forecast into saline bags, diagnostic kits and hospital beds. Each uses a per-case rate learned from the onsite data.
+  - Scarcity controls: an **Available Regional Stock** slider (30–100%), **Total spraying crews**, and an optional 20% minimum-coverage floor. Scope is one city or all 60 wards.
+  - Wards are served in priority order. Critical wards are filled first, then the rest by expected cases × population-density weight.
+  - Headline cards show required vs. available per supply and the number of **critical supply deficits**.
+  - A ranked plan shows coverage bars, crews assigned vs. needed, and CRITICAL DEFICIT / WARNING badges.
+
 ## Results (held-out test 2024–2025, never used for training or tuning)
 
 | Horizon | MAE (cases/ward-week) | RMSE | Exact risk tier (of 4) | High-risk recall |
@@ -74,7 +82,8 @@ are in [ARCHITECTURE.md](ARCHITECTURE.md).
 ## Project structure
 
 ```
-data/raw/dengue.csv        dataset provided by the organisers
+data/raw/dengue.csv        dataset provided by the organisers (Phase 1)
+data/raw/dengue_onsite.csv Phase 2 dataset: same rows + saline / kits / beds columns
 src/config.py              paths, horizons, split years
 src/data.py                load + validate
 src/features.py            multi-week ward-level lag pipeline
@@ -82,6 +91,7 @@ src/tiers.py               Low/Medium/High/Critical cut-offs
 src/train.py               model comparison, training, metrics, joblib export
 src/predict.py             RiskEngine: forecasts, TreeSHAP drivers, what-if
 src/experiments.py         ensembles / tuning / neural-net comparison
+src/resources.py           supply rates, ward priority, scarce-stock greedy allocation, crews
 server/api.py              FastAPI JSON API over the RiskEngine + serves web/
 server/__main__.py         `python -m server` launcher (uvicorn, opens the browser)
 web/index.html             app shell (top bar, navigation, theme toggle)
@@ -89,9 +99,11 @@ web/styles.css             design system: tokens, light/dark themes, components,
 web/js/                    ES modules: state/URL, API client, UI kit, ECharts theme, views
 web/vendor/echarts.min.js  Apache ECharts, vendored so the app works offline
 app/                       alternative Streamlit dashboard (pages, components, Plotly charts, theme)
-models/                    model_h{2,3,4}.joblib + metrics.json
+models/                    model_h{2,3,4}.joblib + metrics.json + resource_rates.json
 tests/test_features.py     lag/leakage tests
 tests/test_api.py          API tests: every endpoint, city, horizon, date edge and simulation extreme
+tests/test_data.py         onsite dataset = Phase 1 dataset + supply columns (forecasts unchanged)
+tests/test_resources.py    allocation: rates, priority, conservation, Critical-first, flags, crews, 400s
 ```
 
 ## Tech stack
@@ -117,7 +129,7 @@ tests/test_api.py          API tests: every endpoint, city, horizon, date edge a
 | Tool / API | Used for |
 |---|---|
 | Claude (Anthropic, claude.ai) | Planning, exploring the data, drafting code for the feature pipeline, training script, inference engine and dashboard, and drafting documentation. The team reviewed, ran, tested and modified all code and can explain it. |
-| Claude Code (Anthropic) | Building the web frontend (server/, web/), API tests and the Streamlit restyle. The team reviewed, ran and tested all changes. |
+| Claude Code (Anthropic) | Building the web frontend (server/, web/), API tests and the Streamlit restyle. In Phase 2, drafting the resource allocation engine, its API, tests and the Resources view. The team reviewed, ran and tested all changes. |
 
 **External APIs at runtime: none.** The app makes no network calls and uses no LLM.
 

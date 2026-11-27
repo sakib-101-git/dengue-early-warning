@@ -5,9 +5,10 @@ import { getMeta, initState, setState, state, subscribe } from "./state.js";
 import { errorBox, placeThumb, reducedMotion, watchSeg } from "./ui.js";
 import { mountCity } from "./views/city.js";
 import { mountModel } from "./views/model.js";
+import { mountResources } from "./views/resources.js";
 import { mountWard } from "./views/ward.js";
 
-const VIEWS = { ward: mountWard, city: mountCity, model: mountModel };
+const VIEWS = { ward: mountWard, city: mountCity, model: mountModel, resources: mountResources };
 const viewEl = document.getElementById("view");
 const nav = document.querySelector(".seg--nav");
 let current = null, currentName = "";
@@ -58,7 +59,9 @@ function markNav(view) {
     if (a.dataset.nav === view) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
   });
   placeThumb(nav);
-  document.title = `${{ ward: "Ward", city: "City", model: "Model" }[view]} · Dengue Watch`;
+  const on = nav.querySelector('[aria-current="page"]');  // keep the active tab visible when the nav scrolls (phones)
+  if (on && nav.scrollWidth > nav.clientWidth) nav.scrollLeft = on.offsetLeft - (nav.clientWidth - on.offsetWidth) / 2;
+  document.title = `${{ ward: "Ward", city: "City", model: "Model", resources: "Resources" }[view]} · Dengue Watch`;
 }
 
 function swapView(s, prev) {

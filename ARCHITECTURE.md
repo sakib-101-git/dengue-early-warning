@@ -167,3 +167,57 @@ achievable limit. One global model also forecasts new wards without retraining.
 - **Planned live weather feed (final round).** Fetch once per day per city, cache to disk with a
   timestamp, retry with exponential back-off, and fall back to the last cached value, so the
   dashboard never breaks when the network does.
+
+## 7. Phase 2: operational command system
+
+Phase 2 adds operations modules on top of the unchanged forecaster. The onsite dataset
+(`data/raw/dengue_onsite.csv`) has the same 31,320 rows and identical base columns as the Phase 1
+file, plus `saline_bags_needed`, `diagnostic_kits_needed` and `hospital_beds_required`.
+`tests/test_data.py` checks that the base columns are identical. So the features, models and
+forecasts do not change, and no retraining is needed. `config.RAW_CSV` uses the onsite file when it
+exists and falls back to `dengue.csv`.
+
+### 7.1 Constrained resource allocation (`src/resources.py`, `GET /api/allocation`)
+
+**Supply rates are learned, not hardcoded.** In the data, each supply is almost exactly a per-case
+ratio. One rate `k` per supply is fitted by least squares through the origin
+(`units = k × cases`) on **training years only** (≤ 2022), then scored on 2024–25. The rates are
+cached in `models/resource_rates.json`; refit them with `python -m src.resources`.
+
+| Supply | k per case | R² (test) |
+|---|---|---|
+| Saline bags | 2.384 | 0.9996 |
+| Diagnostic kits | 1.158 | 0.998 |
+| Hospital beds | 0.295 | 0.973 |
+
+**Units.** Requirement = `round(k × expected cases)` for the forecast week. A "safety" figure uses
+the q90 forecast (upper end of the 80% range).
+
+**Priority.** Wards are sorted by risk tier (Critical > High > Medium > Low). Within a tier they
+are sorted by `expected_cases × density_weight`, where
+`density_weight = ward density / city median density`, clipped to 0.5–2.0. Ties break by ward ID,
+so the plan is deterministic. Each ward's priority rank is shown in the UI.
+
+**Allocation, per supply.** Available stock = `floor(stock% × total required in scope)`, where the
+scope is one city or all 60 wards. Stock is then handed out greedily:
+1. Critical wards are filled completely, in priority order.
+2. With the optional floor: every other ward is raised to 20% of its need.
+3. The remaining stock goes down the priority list.
+
+No ward gets more than it needs, and total allocated = min(available, required), so nothing is
+wasted. Tests check this conservation property at several stock levels.
+
+**Flags.**
+- **CRITICAL DEFICIT:** a High or Critical ward gets less than 100% of any supply.
+- **WARNING:** a lower-tier ward gets less than 100% of any supply.
+
+**Spraying crews.**
+- Crews needed: Low 0, Medium 1, High 2, Critical 3.
+- Wards in the top 25% of density in their city get +1. This applies only to wards that need
+  spraying at all, i.e. Medium and above.
+- The "Total spraying crews" pool is assigned down the same priority list.
+
+**Cost.** One request is a pandas lookup of the precomputed forecast table plus a greedy pass over
+at most 60 wards. It takes about 30 ms cold, and results are cached per (scope, week, horizon,
+stock, crews, floor).
+
