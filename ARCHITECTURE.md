@@ -344,11 +344,17 @@ human-facing text follows fixed writing rules. The JSON context keeps every engi
   stay, but each is followed by one sentence on what it means and one on why the ward is short,
   e.g. "Stock this week covers 60% of what all 60 wards need; it went first to 33 wards with more
   risk or crowding." (33 = the ward's priority rank - 1.)
+- Two kinds of bed, always labelled, so two bed numbers are never shown side by side unexplained.
+  **Extra (surge) beds** are the task-1 bed supply (k x cases, shown as need / getting like saline
+  and kits). **Regular beds** are a ward's usual capacity from overflow routing (task 2).
 - One bed story per ward: patients who may need a bed (in a bad week when beds are planned on the
-  upper forecast) vs the ward's local beds, transfers in/out by ward name, and whether the rest of the
-  city is full.
-- At most 3 actions, each with a verb, an amount and a deadline. Deadline = the Monday before the
-  forecast week, but never sooner than 3 days after the data date (`dispatch.deadline`).
+  upper forecast) vs the ward's regular beds, transfers in/out by ward name, and whether the other
+  wards of the city have free beds, e.g. "Up to 4 patients may need a bed in a bad week, which fills
+  all 4 regular beds; other Dhaka North wards have none free, so the ward needs extra beds."
+- At most 3 actions, each with a verb, an amount and a deadline, e.g. "Request 21 saline bags, 10
+  test kits and 3 extra beds from the regional store by 21 Jul". WhatsApp shows the same actions
+  with their amounts, without the deadline, which is in its section title. Deadline = the Monday
+  before the forecast week, but never sooner than 3 days after the data date (`dispatch.deadline`).
 - Every ward and city context carries `summary` (the "In short" text), `reasons`, `bed_story`,
   `deadline` and actions as `{key, text, sms, chat}`, so the UI shows exactly what was sent.
 
@@ -358,11 +364,15 @@ human-facing text follows fixed writing rules. The JSON context keeps every engi
   counts it: 160 septets for one segment, 153 per segment when concatenated, and extension
   characters (`^ { } [ ] ~ \ |` and the euro sign) take 2. The target is **1 segment (160)**:
   ward, cases and range, the biggest shortage, and one action with a deadline, signed
-  "-Dengue Watch". A second segment (306 in all) is used only for an extra critical fact (a bed
-  transfer, a patient with no bed, or no crew for a Critical ward). The flag word itself is left to
-  WhatsApp and the brief, where there is room for its meaning and reason. Tests check that all 60
+  "-Dengue Watch". Wards with a supply deficit open with their flag ("CRITICAL: DNCC Ward 01
+  dengue, about 9 cases wk of 28 Jul (up to 14). Need 21 saline, 10 kits, 3 beds, none allocated
+  yet. Resupply by 21 Jul. -Dengue Watch", or "WARNING: ..."); other wards open with "Dengue
+  alert". Variants are tried in a fixed order: shorter wording first ("3 extra beds" to "3 beds"),
+  then without the signature, and only then with fewer facts. A second segment (306 in all) is used
+  only for an extra critical fact (a bed transfer, a patient with no bed, or no crew for a Critical
+  ward). The flag's meaning and reason are in WhatsApp and the brief. Tests check that all 60
   wards fit 2 segments on four weeks at 30% and 100% stock with 50% bed capacity, and that at least
-  80% fit 1 segment at default settings (100% at the API defaults, about 97% in the UI scenario).
+  80% fit 1 segment at default settings (100% at the API defaults, 58 of 60 in the UI scenario).
   The UI recounts live while the user edits.
 - **WhatsApp.** A scannable chat message of about 15 lines: a status dot (red critical, orange
   warning, green ok), then *What to expect*, *Supplies: need / getting* (with flag, meaning and
@@ -380,8 +390,8 @@ human-facing text follows fixed writing rules. The JSON context keeps every engi
   colour is used only for status, so it prints in grayscale. A ward brief fits on one page.
 
 **Alerts.** A ward with any supply below 100% always gets its flag (`CRITICAL DEFICIT` for
-High/Critical tier, else `WARNING`) with meaning and reason in WhatsApp and the brief, and its
-shortage in the SMS. A ward still over bed capacity after routing gets a `BED OVERFLOW` alert, and
+High/Critical tier, else `WARNING`) with meaning and reason in WhatsApp and the brief; its SMS
+starts with `CRITICAL:` or `WARNING:` and names the shortage. A ward still over bed capacity after routing gets a `BED OVERFLOW` alert, and
 every channel says how many patients may have no bed.
 
 **Crew impact (optional).** `plan=allocation` runs the simulator counterfactual for exactly the crews

@@ -36,8 +36,8 @@ def wards(client):
 
 
 DECIMAL = re.compile(r"\d\.\d")                                  # cases are whole numbers in human text
-JARGON = ("80% range", "q10", "q90", "issue week", "surge", "priority #", "bed load", "derived", "headroom",
-          "utilisation", "counterfactual", "allocated /")
+JARGON = ("80% range", "q10", "q90", "issue week", "surge demand", "priority #", "bed load", "derived", "headroom",
+          "utilisation", "counterfactual", "allocated /", "local bed")
 
 
 # ---------------------------------------------------------------- plain-language helpers
@@ -78,8 +78,13 @@ def test_every_ward_sms_fits_two_gsm7_segments(client, week, stock):
         assert info == d["sms_info"]
         assert info["encoding"] == "GSM-7", d["sms"]
         assert info["segments"] <= 2, d["sms"]
-        assert d["sms"].startswith(("Dengue alert " + w.replace("_", " "), "Dengue update " + w.replace("_", " ")))
-        assert d["sms"].endswith("-Dengue Watch") and not DECIMAL.search(d["sms"]), d["sms"]
+        name, flag = w.replace("_", " "), d["context"]["flag"]
+        if flag:   # deficit wards lead with their flag
+            assert d["sms"].startswith(f"{dispatch.SMS_FLAG[flag]}: {name} dengue, "), d["sms"]
+        else:
+            assert d["sms"].startswith((f"Dengue alert {name}: ", f"Dengue update {name}: ")), d["sms"]
+        # the signature is the first thing dropped when space is short
+        assert d["sms"].endswith(("-Dengue Watch", ".")) and not DECIMAL.search(d["sms"]), d["sms"]
 
 
 @pytest.mark.parametrize("params", [dict(), dict(pool="all", plan="allocation", **SCARCE)], ids=["api", "ui"])
@@ -177,8 +182,10 @@ def test_every_deficit_ward_gets_an_alert_line(client):
             assert ctx["flag"] in d["brief"] and reason in d["brief"]
             assert ctx["reasons"]["supplies"].startswith(reason)
             assert any(x in d["sms"] for x in ("Need ", "Short ", "No supplies allocated")), d["sms"]
+            assert d["sms"].startswith({"CRITICAL DEFICIT": "CRITICAL: ", "WARNING": "WARNING: "}[ctx["flag"]]), d["sms"]
         else:
             assert ctx["reasons"]["supplies"] is None and "Stock this week covers" not in d["whatsapp"]
+            assert not d["sms"].startswith(("CRITICAL:", "WARNING:")), d["sms"]
         if beds_short:
             assert "bed" in d["sms"] and "may have no bed" in d["whatsapp"]
             assert "may have no bed" in ctx["bed_story"]
@@ -233,6 +240,29 @@ def test_ward_brief_and_text_formats(client):
     assert sms.headers["content-type"].startswith("text/plain") and sms.text.startswith("Dengue alert DSCC Ward 06:")
     wa = notice(client, scope="ward", id="DSCC_Ward_06", format="whatsapp")
     assert wa.text[2:].startswith("*Dengue alert: DSCC Ward 06, Dhaka South*")
+
+
+def test_dncc_ward_01_reference_texts(client):
+    d = notice(client, scope="ward", id="DNCC_Ward_01", pool="all", plan="allocation", **SCARCE).json()
+    assert d["sms"] == ("CRITICAL: DNCC Ward 01 dengue, about 9 cases wk of 28 Jul (up to 14). Need 21 saline, 10 kits, "
+                        "3 beds, none allocated yet. Resupply by 21 Jul. -Dengue Watch")
+    wa = d["whatsapp"]
+    # actions carry their amounts
+    assert "1. Request 21 saline bags, 10 test kits and 3 extra beds from the regional store." in wa
+    assert "Ask the city for 2 spraying crews." in wa
+    # the two kinds of bed are always labelled
+    assert "extra (surge) beds 3 / 0" in wa
+    assert ("Up to 4 patients may need a bed in a bad week, which fills all 4 regular beds; other Dhaka North wards "
+            "have none free, so the ward needs extra beds.") in wa
+
+
+def test_bed_numbers_are_always_labelled(client):
+    for w in wards(client):
+        ctx = notice(client, scope="ward", id=w, pool="all", plan="allocation", **SCARCE).json()["context"]
+        assert "regular bed" in ctx["bed_story"], ctx["bed_story"]
+        for a in ctx["actions"]:
+            if "bed" in a["text"] and a["key"] != "transfer_out":
+                assert "extra bed" in a["text"] or "regular bed" in a["text"], a["text"]
 
 
 def test_method_page_defaults_by_scope_and_can_be_switched(client):

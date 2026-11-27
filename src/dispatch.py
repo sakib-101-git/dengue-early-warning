@@ -11,8 +11,10 @@ Writing rules (the notices are read by councillors and health officers, not anal
 - Plain English, short sentences, no internal terms. Cases are whole numbers ("about 9 cases,
   likely 5 to 14"; "fewer than 1" below 1). The official flags CRITICAL DEFICIT / WARNING are kept
   and always followed by one plain sentence and the reason for the shortage.
-- One bed story per ward: patients who may need a bed vs local beds, transfers in/out, and
-  whether the rest of the city is full.
+- Two kinds of bed, always labelled: "extra (surge) beds" are the bed supply from the allocation (need /
+  getting, like saline and kits); "regular beds" are a ward's usual capacity from overflow routing.
+  One bed story per ward: patients who may need a bed vs regular beds, transfers in/out, and
+  whether the rest of the city is full (so the ward needs extra beds).
 - At most 3 actions, each with a verb, an amount and a deadline: the Monday before the forecast
   week, but never sooner than 3 days after the data date.
 
@@ -82,8 +84,10 @@ MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", 
 SUPPLY_ORDER = ("saline", "kits", "beds")
 SUPPLY_LABEL = {"saline": "Saline bags", "kits": "Diagnostic kits", "beds": "Hospital beds"}
 SUPPLY_PLAIN = {"saline": ("saline bag", "saline bags"), "kits": ("test kit", "test kits"),
-                "beds": ("hospital bed", "hospital beds")}
-SUPPLY_SMS = {"saline": ("saline", "saline"), "kits": ("kit", "kits"), "beds": ("bed", "beds")}
+                "beds": ("extra bed", "extra beds")}
+SUPPLY_TITLE = {"saline": "Saline bags", "kits": "Test kits", "beds": "Extra (surge) beds"}
+SUPPLY_SMS = {"saline": ("saline", "saline"), "kits": ("kit", "kits"), "beds": ("extra bed", "extra beds")}
+SUPPLY_SMS_SHORT = {**SUPPLY_SMS, "beds": ("bed", "beds")}     # SMS fallback when "extra" does not fit
 TIER_ORDER = {"Low": 0, "Medium": 1, "High": 2, "Critical": 3}
 CRITICAL_DEFICIT, WARNING = "CRITICAL DEFICIT", "WARNING"
 FLAG_MEANING = {CRITICAL_DEFICIT: "this high-risk ward will not get all the supplies it needs",
@@ -156,9 +160,14 @@ def safe_name(text: str) -> str:
     return "_".join(p for p in keep.split("_") if p) or "notice"
 
 
-def supply_amount(key: str, n: int, sms: bool = False) -> str:
-    one, many = (SUPPLY_SMS if sms else SUPPLY_PLAIN)[key]
+def supply_amount(key: str, n: int, sms: bool = False, short: bool = False) -> str:
+    one, many = (SUPPLY_SMS_SHORT if short else SUPPLY_SMS if sms else SUPPLY_PLAIN)[key]
     return plural(n, one, many)
+
+
+def no_deadline(text: str, by: str) -> str:
+    """WhatsApp puts the deadline in the section title, so its actions drop the trailing 'by <date>'."""
+    return text.replace(f", by {by}.", ".").replace(f" by {by}.", ".")
 
 
 # ---------------------------------------------------------------- contexts (numbers come from the payloads)
@@ -278,15 +287,16 @@ def ward_alerts(c: dict) -> list[dict]:
         n = b["net_deficit"]
         detail = (f"{b['demand']} beds needed vs {b['capacity']} capacity; "
                   f"{plural(n, 'patient')} still without a bed after same-city routing")
-        plain = (f"BED OVERFLOW: {plural(n, 'patient')} may have no hospital bed; "
-                 f"no other ward in {c['city']} has a free bed.")
+        plain = (f"BED OVERFLOW: {plural(n, 'patient')} may have no bed; "
+                 f"no other ward in {c['city']} has a free regular bed, so the ward needs extra beds.")
         out.append({"level": CRITICAL_DEFICIT if TIER_ORDER[c["tier"]] >= 2 else WARNING, "label": "BED OVERFLOW",
                     "kind": "beds", "detail": detail, "text": f"BED OVERFLOW: {detail}.", "plain": plain})
     return out
 
 
-def _act(rank: int, key: str, text: str, sms: str, chat: str) -> tuple:
-    return (rank, {"key": key, "text": text, "sms": sms, "chat": chat})
+def _act(rank: int, key: str, text: str, sms: str, chat: str | None = None, by: str = "") -> tuple:
+    """text = brief (verb + amount + deadline); sms = short form; chat = WhatsApp (same amounts, no deadline)."""
+    return (rank, {"key": key, "text": text, "sms": sms, "chat": chat if chat is not None else no_deadline(text, by)})
 
 
 def ward_actions(c: dict) -> list[dict]:
@@ -298,38 +308,37 @@ def ward_actions(c: dict) -> list[dict]:
     acts = []
     if b and b["net_deficit"] > 0:
         n = b["net_deficit"]
-        acts.append(_act(10, "beds_escalate", f"Arrange {plural(n, 'extra hospital bed')} at the city hospital by {by}.",
-                         f"Book {plural(n, 'bed')} at the city hospital by {by}.", "Arrange extra beds at the city hospital."))
+        acts.append(_act(10, "beds_escalate", f"Arrange {plural(n, 'extra bed')} at the city hospital by {by}.",
+                         f"Book {plural(n, 'extra bed')} at the city hospital by {by}.", by=by))
     if short:
         items = join_and([supply_amount(s["key"], s["deficit"]) for s in short])
         rank = 20 if c["flag"] == CRITICAL_DEFICIT else 70
         acts.append(_act(rank, "resupply", f"Request {items} from the regional store by {by}.",
-                         f"Request resupply by {by}.", "Request the missing supplies from the regional store."))
+                         f"Resupply by {by}.", by=by))
     if b and b["transfers_out"]:
         to = join_and([f"{plural(t['patients'], 'patient')} to {t['to_name']}" for t in b["transfers_out"]])
         first = b["transfers_out"][0]
         acts.append(_act(30, "transfer_out", f"Phone ahead, then move {to} by {by}.",
-                         f"Send {plural(first['patients'], 'patient')} to {first['to_name']} by {by}.",
-                         "Phone the receiving ward before moving patients."))
+                         f"Send {plural(first['patients'], 'patient')} to {first['to_name']} by {by}.", by=by))
     crews = c["crews_assigned"]
     with_crews = f" with the {plural(crews, 'assigned crew')}" if crews else ""
     if tier == "Critical":
         acts.append(_act(40, "tier", f"Open a fever corner and start daily larviciding{with_crews} by {by}.",
-                         f"Open a fever corner by {by}.", "Open a fever corner and start daily larviciding."))
+                         f"Open a fever corner by {by}.", by=by))
     elif tier == "High":
         acts.append(_act(45, "tier", f"Start door-to-door checks for mosquito breeding sites{with_crews} by {by}.",
-                         f"Start door-to-door checks by {by}.", "Start door-to-door checks for mosquito breeding sites."))
+                         f"Start door-to-door checks by {by}.", by=by))
     gap = c["crews_needed"] - crews
     if gap > 0:
-        acts.append(_act(50, "crews", f"Ask the city for {plural(gap, 'more spraying crew')} by {by}.",
-                         f"Ask for {plural(gap, 'more crew')} by {by}.", "Ask the city for the missing crews."))
+        acts.append(_act(50, "crews", f"Ask the city for {plural(gap, 'spraying crew')} by {by}.",
+                         f"Ask for {plural(gap, 'more crew')} by {by}.", by=by))
     if b and b["transfers_in"]:
         frm = join_and([t["from_name"] for t in b["transfers_in"]])
-        acts.append(_act(60, "transfer_in", f"Get {plural(b['received'], 'bed')} ready for patients from {frm} by {by}.",
-                         f"Ready {plural(b['received'], 'bed')} by {by}.", "Get beds ready for the incoming patients."))
+        acts.append(_act(60, "transfer_in", f"Get {plural(b['received'], 'regular bed')} ready for patients from {frm} by {by}.",
+                         f"Ready {plural(b['received'], 'regular bed')} by {by}.", by=by))
     if tier == "Medium":
         acts.append(_act(80, "tier", f"Run weekly larviciding{with_crews} and clear standing water by {by}.",
-                         f"Run larviciding by {by}.", "Run weekly larviciding and clear standing water."))
+                         f"Run larviciding by {by}.", by=by))
     elif tier == "Low":
         acts.append(_act(90, "tier", f"Keep routine checks; no extra action is needed before {by}.",
                          "Keep routine checks.", "Keep routine checks; no extra action needed."))
@@ -338,41 +347,50 @@ def ward_actions(c: dict) -> list[dict]:
 
 
 def bed_need_phrase(b: dict, with_normal: bool = True) -> str:
-    """'Up to 4 patients may need a hospital bed in a bad week (normally 3)' or 'About 3 patients may ...'."""
+    """'Up to 4 patients may need a bed in a bad week (normally 3)' or 'About 3 patients may need a bed'."""
     if b["basis"] == "surge":
-        s = f"Up to {plural(b['demand_surge'], 'patient')} may need a hospital bed in a bad week"
+        s = f"Up to {plural(b['demand_surge'], 'patient')} may need a bed in a bad week"
         if with_normal and b["demand_expected"] != b["demand_surge"]:
             s += f" (normally {b['demand_expected']})"
         return s
-    return f"About {plural(b['demand_expected'], 'patient')} may need a hospital bed"
+    return f"About {plural(b['demand_expected'], 'patient')} may need a bed"
 
 
 def bed_story(c: dict, with_normal: bool = True) -> str:
-    """One plain story: need vs local beds, transfers in/out, and whether the city is full."""
+    """One plain story: patients who may need a bed vs the ward's regular beds, transfers in/out, and whether
+    the other wards of the city are full (so the ward needs extra beds)."""
     b = c["beds"]
     if not b:
         return ""
     d, cap = b["demand"], b["capacity"]
+    regular = plural(cap, "regular bed")
     if d == 0:
-        s = f"No hospital beds should be needed; the ward has {plural(cap, 'local bed')}."
+        s = f"No beds should be needed this week; the ward has {regular}"
     else:
         s = bed_need_phrase(b, with_normal)
         if d < cap:
-            s += f"; the ward's {plural(cap, 'local bed')} are enough." if cap != 1 else "; the ward's local bed is enough."
+            s += f"; its {regular} {'is' if cap == 1 else 'are'} enough"
         elif d == cap:
-            s += ", which fills every local bed."
+            s += ", which fills its 1 regular bed" if cap == 1 else f", which fills all {cap} regular beds"
         else:
-            s += f", but the ward has only {plural(cap, 'local bed')}."
+            s += f", but the ward has only {regular}"
+    moves = []
     if b["transfers_out"]:
-        s += " Send " + join_and([f"{plural(t['patients'], 'patient')} to {t['to_name']}" for t in b["transfers_out"]]) + "."
+        moves.append("Send " + join_and([f"{plural(t['patients'], 'patient')} to {t['to_name']}" for t in b["transfers_out"]]))
     if b["transfers_in"]:
-        s += " Expect " + join_and([f"{plural(t['patients'], 'patient')} from {t['from_name']}" for t in b["transfers_in"]]) + "."
+        moves.append("Expect " + join_and([f"{plural(t['patients'], 'patient')} from {t['from_name']}" for t in b["transfers_in"]]))
     free = city_free_beds(c.get("city_beds"))
+    city = ""
     if b["net_deficit"] > 0:
-        s += f" {plural(b['net_deficit'], 'patient')} may have no bed: other wards in {c['city']} are full too."
+        city = (f"other {c['city']} wards have {'no more free beds' if b['transfers_out'] else 'none free'}, so "
+                f"{plural(b['net_deficit'], 'patient')} may have no bed and the ward needs extra beds")
     elif d >= cap and d > 0 and free == 0:
-        s += f" Other wards in {c['city']} have no free beds either."
-    return s
+        city = (f"other {c['city']} wards have {'no more free beds' if b['transfers_out'] else 'none free'}, "
+                "so the ward needs extra beds")
+    if not moves:
+        return s + (f"; {city}." if city else ".")
+    tail = "; ".join(moves[:1] + ([city] if city else []))
+    return s + ". " + tail + "." + "".join(f" {m}." for m in moves[1:])
 
 
 def ward_in_short(c: dict) -> str:
@@ -388,7 +406,7 @@ def ward_in_short(c: dict) -> str:
         problems.append(f"it is getting only {pct(worst['coverage'])} of the {SUPPLY_PLAIN[worst['key']][1]} it needs")
     b = c["beds"]
     if b and b["net_deficit"] > 0:
-        problems.append(f"{plural(b['net_deficit'], 'patient')} may have no hospital bed")
+        problems.append(f"{plural(b['net_deficit'], 'patient')} may have no bed")
     elif b and b["transfers_out"]:
         problems.append(f"{plural(b['sent'], 'patient')} must be moved to another ward's hospital")
     if not problems:
@@ -467,28 +485,27 @@ def city_actions(c: dict) -> list[dict]:
         acts.append(_act(10, "release_stock", f"Release emergency stock to the {plural(len(crit), 'high-risk ward')} "
                          f"short of supplies ({names}) by {by}.",
                          f"Release stock to {plural(len(crit), 'ward')} by {by}.",
-                         "Release emergency stock to the wards short of supplies."))
+                         f"Release emergency stock to the {plural(len(crit), 'high-risk ward')} short of supplies."))
     b = c["beds"]
     if b and b["unresolved"] > 0:
-        acts.append(_act(20, "beds_escalate", f"Arrange {plural(b['unresolved'], 'extra hospital bed')} at the city or "
-                         f"regional hospital by {by}.", f"Find {plural(b['unresolved'], 'extra bed')} by {by}.",
-                         "Arrange extra beds at the city or regional hospital."))
+        acts.append(_act(20, "beds_escalate", f"Arrange {plural(b['unresolved'], 'extra bed')} at the city or "
+                         f"regional hospital by {by}.", f"Find {plural(b['unresolved'], 'extra bed')} by {by}.", by=by))
     if c["transfers"]:
         n = sum(t["patients"] for t in c["transfers"])
         acts.append(_act(30, "transfers", f"Coordinate the move of {plural(n, 'patient')} between ward hospitals by {by}.",
-                         f"Move {plural(n, 'patient')} by {by}.", "Coordinate the bed transfers listed above."))
+                         f"Move {plural(n, 'patient')} by {by}.", by=by))
     gap = c["crews_needed"] - c["crews_assigned"]
     if gap > 0:
         acts.append(_act(40, "crews", f"Find {plural(gap, 'more spraying crew')} by {by}.",
-                         f"Find {plural(gap, 'more crew')} by {by}.", "Find more spraying crews."))
+                         f"Find {plural(gap, 'more crew')} by {by}.", by=by))
     warn = [w for w in c["wards"] if w["flag"] == WARNING]
     if warn:
         acts.append(_act(50, "top_up", f"Top up the {plural(len(warn), 'ward')} with a WARNING at the next delivery, by {by}.",
-                         f"Top up {plural(len(warn), 'ward')} by {by}.", "Top up the wards with a WARNING."))
+                         f"Top up {plural(len(warn), 'ward')} by {by}.", by=by))
     hot = [w for w in c["wards"] if TIER_ORDER[w["tier"]] >= 2]
     if hot:
         acts.append(_act(60, "tier", f"Start daily larviciding and door-to-door checks in the {plural(len(hot), 'high-risk ward')} by {by}.",
-                         f"Start larviciding by {by}.", "Start daily larviciding and door-to-door checks in high-risk wards."))
+                         f"Start larviciding by {by}.", by=by))
     if not acts:
         acts.append(_act(90, "routine", "Keep routine checks and weekly larviciding; no shortfalls this week.",
                          "Keep routine checks.", "Keep routine checks and weekly larviciding."))
@@ -501,18 +518,19 @@ def city_bed_story(c: dict) -> str:
     if not b:
         return ""
     st = c["settings"]
-    need = "may need a hospital bed in a bad week" if st["basis"] == "surge" else "may need a hospital bed"
+    need = "may need a bed in a bad week" if st["basis"] == "surge" else "may need a bed"
     s = f"Up to {plural(b['demand'], 'patient')} {need}" if st["basis"] == "surge" else f"About {plural(b['demand'], 'patient')} {need}"
     if b["demand"] > b["capacity"]:
-        s += f", more than the {b['capacity']} local beds in {c['city']}'s wards."
+        s += f", more than the {b['capacity']} regular beds in {c['city']}'s wards."
     elif b["demand"] == b["capacity"]:
-        s += f", which fills every local bed in {c['city']}'s wards."
+        s += f", which fills all {b['capacity']} regular beds in {c['city']}'s wards."
     else:
-        s += f"; {c['city']}'s wards have {b['capacity']} local beds."
+        s += f"; {c['city']}'s wards have {b['capacity']} regular beds."
     if b["transferred"]:
-        s += f" {plural(b['transferred'], 'patient')} can be moved to wards with free beds."
+        s += f" {plural(b['transferred'], 'patient')} can be moved to wards with free regular beds."
     if b["unresolved"]:
-        s += f" {plural(b['unresolved'], 'patient')} may have no bed: the city's ward hospitals are full."
+        s += (f" {plural(b['unresolved'], 'patient')} may have no bed: every ward's regular beds are full, "
+              "so the city needs extra beds.")
     elif b["overflow_before"] == 0:
         s += " No transfers are needed."
     return s
@@ -528,7 +546,7 @@ def city_in_short(c: dict) -> str:
     if c["n_critical_deficit"]:
         problems.append(f"{plural(c['n_critical_deficit'], 'high-risk ward')} will not get all the supplies they need")
     if c["beds"] and c["beds"]["unresolved"]:
-        problems.append(f"{plural(c['beds']['unresolved'], 'patient')} may have no hospital bed")
+        problems.append(f"{plural(c['beds']['unresolved'], 'patient')} may have no bed")
     if problems:
         s += " " + join_and(problems).capitalize() + "."
     if c["actions"]:
@@ -548,19 +566,24 @@ def _fit(variants: list[str], max_segments: int) -> str | None:
     return None
 
 
-def _sms_supplies(c: dict) -> list[str]:
-    """Shortage phrases from fullest to shortest ('' when nothing is short)."""
+def _sms_supplies(c: dict) -> list[list[str]]:
+    """Shortage phrases, one group per level of detail (fullest first). Within a group the wording only
+    shortens ("3 extra beds" -> "3 beds"); moving to the next group drops facts."""
     short = [s for s in c["supplies"] if s["deficit"] > 0]
     if not short:
-        return [" Supplies are covered.", ""]
+        return [[" Supplies are covered."], [""]]
     need = [s for s in c["supplies"] if s["required"]]
+
+    def items(rows, field, sh):
+        return ", ".join(supply_amount(s["key"], s[field], sms=True, short=sh) for s in rows)
+
     if all(s["allocated"] == 0 for s in need):
-        items = ", ".join(supply_amount(s["key"], s["required"], sms=True) for s in need)
-        return [f" Need {items} - none allocated yet.", f" Need {items}, none allocated yet.",
-                f" Need {items}, none allocated.", " No supplies allocated yet."]
-    items = ", ".join(supply_amount(s["key"], s["deficit"], sms=True) for s in short)
+        return [[f" Need {items(need, 'required', sh)}, none allocated yet." for sh in (False, True)],
+                [f" Need {items(need, 'required', sh)}, none allocated." for sh in (False, True)],
+                [" No supplies allocated yet."]]
     worst = max(short, key=lambda s: (1 - s["coverage"], s["deficit"]))
-    return [f" Short {items}.", f" Short {supply_amount(worst['key'], worst['deficit'], sms=True)}."]
+    return [[f" Short {items(short, 'deficit', sh)}." for sh in (False, True)],
+            [f" Short {items([worst], 'deficit', sh)}." for sh in (False, True)]]
 
 
 def _sms_extras(c: dict) -> list[str]:
@@ -579,25 +602,38 @@ def _sms_extras(c: dict) -> list[str]:
     return out
 
 
+SMS_FLAG = {CRITICAL_DEFICIT: "CRITICAL", WARNING: "WARNING"}
+
+
 def sms_ward(c: dict) -> str:
-    alert = c["flag"] or TIER_ORDER[c["tier"]] >= 2 or (c["beds"] and c["beds"]["net_deficit"])
-    word = "Dengue alert" if alert else "Dengue update"
+    """Deficit wards open with their flag ("CRITICAL: DNCC Ward 01 dengue, ..."), others with "Dengue alert".
+    Variants are tried from fullest to shortest: shorter wording first, then without the signature, and
+    only then with fewer facts."""
     rng = whole(c["high_80"])
     cases = cases_phrase(c["expected"])
     wk = day(c["target_date"], False)
     up = f" (up to {rng})" if rng > max(whole(c["expected"]), 0) else ""
-    heads = [f"{word} {c['name']}: {cases} expected wk of {wk}{up}.",
-             f"{word} {c['name']}: {cases} wk of {wk}{up}."]
-    sup = _sms_supplies(c)
+    if c["flag"]:
+        heads = [f"{SMS_FLAG[c['flag']]}: {c['name']} dengue, {cases} wk of {wk}{up}."]
+    else:
+        alert = TIER_ORDER[c["tier"]] >= 2 or (c["beds"] and c["beds"]["net_deficit"])
+        word = "Dengue alert" if alert else "Dengue update"
+        heads = [f"{word} {c['name']}: {cases} expected wk of {wk}{up}.",
+                 f"{word} {c['name']}: {cases} wk of {wk}{up}."]
     act = f" {c['actions'][0]['sms']}" if c["actions"] else ""
+
+    def variants(extras: str, groups: list[list[str]]) -> list[str]:
+        return [h + s + extras + act + sign for group in groups for sign in (SIGN, "")
+                for h in heads for s in group]
+
+    groups = _sms_supplies(c)
     extras = "".join(_sms_extras(c))
-    one = [h + s + act + SIGN for s in sup for h in heads]
-    if extras:
-        two = [h + s + extras + act + SIGN for s in sup for h in heads]
-        msg = _fit([v.replace(act + SIGN, extras + act + SIGN) for v in one], 1) or _fit(two, SMS_MAX_SEGMENTS)
+    one = variants("", groups)
+    if extras:   # a critical extra fact may use a second segment rather than cost the supply facts
+        msg = _fit(variants(extras, groups[:1]), 1) or _fit(variants(extras, groups), SMS_MAX_SEGMENTS)
     else:
         msg = _fit(one, 1)
-    return msg or _fit(one + [heads[-1] + act + SIGN], SMS_MAX_SEGMENTS) or to_gsm(heads[-1] + SIGN)
+    return msg or _fit(one + [heads[-1] + act], SMS_MAX_SEGMENTS) or to_gsm(heads[-1])
 
 
 def sms_city(c: dict) -> str:
@@ -629,10 +665,15 @@ def status_emoji(flag: str | None, c: dict) -> str:
     return "\U0001F7E2"              # green circle
 
 
+def supply_line(supplies: list[dict]) -> str:
+    """'Saline bags 21 / 0, test kits 10 / 0, extra (surge) beds 3 / 0' (need / getting)."""
+    return ", ".join(f"{SUPPLY_TITLE[s['key']] if i == 0 else SUPPLY_TITLE[s['key']].lower()} "
+                     f"{s['required']} / {s['allocated']}" for i, s in enumerate(supplies))
+
+
 def whatsapp_ward(c: dict) -> str:
     rng = range_phrase(c["low_80"], c["high_80"])
-    supplies = ", ".join(f"{SUPPLY_PLAIN[s['key']][1].capitalize() if i == 0 else SUPPLY_PLAIN[s['key']][1]} "
-                         f"{s['required']} / {s['allocated']}" for i, s in enumerate(c["supplies"]))
+    supplies = supply_line(c["supplies"])
     L = [f"{status_emoji(c['flag'], c)} *Dengue alert: {c['name']}, {c['city']}*", "",
          "*What to expect*",
          f"{cases_phrase(c['expected']).capitalize()} of dengue{f' ({rng})' if rng else ''}. {c['tier']} risk.", "",
@@ -661,8 +702,7 @@ def whatsapp_ward(c: dict) -> str:
 def whatsapp_city(c: dict) -> str:
     t = c["tiers"]
     risk = join_and([f"{t['Critical']} at critical" if t["Critical"] else "", f"{t['High']} at high risk" if t["High"] else ""])
-    supplies = ", ".join(f"{SUPPLY_PLAIN[s['key']][1].capitalize() if i == 0 else SUPPLY_PLAIN[s['key']][1]} "
-                         f"{s['required']} / {s['allocated']}" for i, s in enumerate(c["supplies"]))
+    supplies = supply_line(c["supplies"])
     flag = CRITICAL_DEFICIT if c["n_critical_deficit"] else WARNING if c["n_warning"] else None
     L = [f"{status_emoji(flag, c)} *Dengue summary: {c['city']}*", "",
          "*What to expect*",
@@ -770,7 +810,7 @@ def _fig(label: str, value: str, sub: str, bad: bool = False) -> str:
 
 def _supply_table(supplies: list[dict]) -> str:
     rows = "".join(
-        f"<tr><td>{_e(SUPPLY_PLAIN[s['key']][1].capitalize())}</td><td class=\"r num\">{s['required']}</td>"
+        f"<tr><td>{_e(SUPPLY_TITLE[s['key']])}</td><td class=\"r num\">{s['required']}</td>"
         f"<td class=\"r num\">{s['allocated']}</td>"
         f"<td class=\"r num{' short' if s['deficit'] else ''}\">{s['deficit'] if s['deficit'] else '&ndash;'}</td></tr>"
         for s in supplies)
@@ -811,7 +851,7 @@ def _ward_page(w: dict, gen: str) -> str:
     exp = "<1" if w["expected"] < 1 else f"{whole(w['expected'])}"
     figs = (_fig("Expected cases", exp, rng or "this week")
             + _fig("Supplies covered", cover, cover_sub, cover_bad)
-            + (_fig("Hospital beds", f"{b['demand']} / {b['capacity']}", "may need a bed / local beds",
+            + (_fig("Regular beds", f"{b['demand']} / {b['capacity']}", "patients who may need a bed / regular beds",
                     b["net_deficit"] > 0) if b else "")
             + _fig("Spraying crews", f"{w['crews_assigned']} of {w['crews_needed']}", "assigned / needed",
                    w["crews_assigned"] < w["crews_needed"]))
@@ -846,7 +886,7 @@ def _beds_cell(w: dict) -> str:
     parts += [f"take {t['patients']} from {_e(t['from_name'])}" for t in b.get("transfers_in", [])]
     if b.get("net_deficit"):
         parts.append(f"<b>{b['net_deficit']} with no bed</b>")
-    return "; ".join(parts) if parts else "enough"
+    return "; ".join(parts) if parts else "regular beds enough"
 
 
 def _ward_status(w: dict) -> str:
@@ -865,7 +905,8 @@ def _city_page(c: dict, gen: str) -> str:
     cover, cover_sub, cover_bad = _lowest_cover(c["supplies"])
     figs = (_fig("Expected cases", f"{whole(c['expected'])}", f"across {c['n_wards']} wards")
             + _fig("Supplies covered", cover, cover_sub, cover_bad)
-            + (_fig("Hospital beds", f"{b['demand']} / {b['capacity']}", "may need a bed / local beds", b["unresolved"] > 0) if b else "")
+            + (_fig("Regular beds", f"{b['demand']} / {b['capacity']}", "patients who may need a bed / regular beds",
+                    b["unresolved"] > 0) if b else "")
             + _fig("Spraying crews", f"{c['crews_assigned']} of {c['crews_needed']}", "assigned / needed",
                    c["crews_assigned"] < c["crews_needed"]))
     flags = []
@@ -887,7 +928,7 @@ def _city_page(c: dict, gen: str) -> str:
         f"<td>{_short_cell(w)}</td><td>{_beds_cell(w)}</td>"
         f"<td class=\"r num nw\">{w['crews_assigned']} of {w['crews_needed']}</td>"
         f"<td class=\"st\">{_e(_ward_status(w))}</td></tr>" for w in top)
-    wards = ('<table class="wt"><thead><tr><th>Ward</th><th>Risk</th><th class="r">Cases</th><th>Short of</th><th>Hospital beds</th>'
+    wards = ('<table class="wt"><thead><tr><th>Ward</th><th>Risk</th><th class="r">Cases</th><th>Short of</th><th>Beds</th>'
              f'<th class="r">Crews</th><th>Status</th></tr></thead><tbody>{rows}</tbody></table>'
              + (f'<p class="muted">{plural(more, "more ward")} also need action; see Dengue Watch for the full list.</p>' if more > 0 else "")
              ) if top else '<p>No ward needs extra action this week.</p>'
@@ -913,7 +954,7 @@ def _method_page(c: dict, gen: str) -> str:
     rates = ""
     if all(k.get(x) for x in SUPPLY_ORDER):
         rates = (f" Each expected case needs about {k['saline']:.1f} saline bags, {k['kits']:.1f} test kits and "
-                 f"{k['beds']:.1f} hospital beds; these rates were learned from 2017 to 2022 hospital records.")
+                 f"{k['beds']:.1f} extra (surge) beds; these rates were learned from 2017 to 2022 hospital records.")
     floor = f" Every other ward first gets at least {st['floor_pct']}% of its need." if st["floor_pct"] else ""
     basis = ("a bad week (the upper end of the likely range)" if st["basis"] == "surge" else "the expected number of cases")
     if st["sim"]:
@@ -935,10 +976,10 @@ covers about 8 in 10 outcomes. This brief uses data up to {day(c['issue_date'])}
 of risk and crowding, until the stock runs out.{floor} The {st['crews_total']} spraying crews in the pool are shared the
 same way.</p>
 <h2>Hospital beds</h2>
-<p>The data has no official bed count, so each ward's local beds are estimated as the most it needed in a bad week
+<p>The data has no official bed count, so each ward's regular beds are estimated as the most it needed in a bad week
 (the busiest 1 week in 20) during 2017 to 2022, with at least 2 beds{'' if st['capacity_pct'] == 100 else f', then scaled to {st["capacity_pct"]}%'}.
-Bed needs are planned for {basis}. Patients who cannot get a local bed are sent to the ward in the same city with the
-most free beds; wards at critical risk keep their spare beds. Distances are not known, so travel time is not considered.</p>
+Bed needs are planned for {basis}. Patients who cannot get a regular bed are sent to the ward in the same city with the
+most free regular beds; wards at critical risk keep their spare beds. Distances are not known, so travel time is not considered.</p>
 <h2>Spraying crews</h2>
 <p>{_e(crews)}</p>
 <h2>Limits</h2>

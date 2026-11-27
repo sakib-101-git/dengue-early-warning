@@ -4,12 +4,12 @@
 About 89 cases of dengue across 10 wards; 1 at critical and 9 at high risk.
 
 *Supplies: need / getting*
-Saline bags 209 / 138, test kits 104 / 67, hospital beds 26 / 17.
+Saline bags 209 / 138, test kits 104 / 67, extra (surge) beds 26 / 17.
 CRITICAL DEFICIT in 5 wards: these high-risk wards will not get all the supplies they need (CCC Ward 06, CCC Ward 08, CCC Ward 09 and 2 more).
 Stock this week covers 60% of what all 60 wards need; it goes first to wards with more risk or crowding.
 
 *Hospital beds*
-Up to 37 patients may need a hospital bed in a bad week, which fills every local bed in Chattogram's wards. 2 patients can be moved to wards with free beds.
+Up to 37 patients may need a bed in a bad week, which fills all 37 regular beds in Chattogram's wards. 2 patients can be moved to wards with free regular beds.
 CCC Ward 07 -> CCC Ward 08: 1 patient
 CCC Ward 09 -> CCC Ward 03: 1 patient
 
@@ -17,8 +17,8 @@ CCC Ward 09 -> CCC Ward 03: 1 patient
 7 of 24 needed are assigned.
 
 *Please do by 21 Jul*
-1. Release emergency stock to the wards short of supplies.
-2. Coordinate the bed transfers listed above.
-3. Find more spraying crews.
+1. Release emergency stock to the 5 high-risk wards short of supplies.
+2. Coordinate the move of 2 patients between ward hospitals.
+3. Find 17 more spraying crews.
 
 _Dengue Watch forecast for the week of 28 Jul 2025, from data up to 7 Jul._

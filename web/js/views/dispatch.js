@@ -29,7 +29,7 @@ const waHtml = (t) => esc(t).replace(/\*([^*\n]+)\*/g, "<b>$1</b>").replace(/(^|
 const whole = (x) => Math.floor(Number(x) + 0.5);
 const casesWord = (x) => (x < 1 ? "fewer than 1 case" : `about ${whole(x)} case${whole(x) === 1 ? "" : "s"}`);
 const rangeWord = (lo, hi) => (whole(hi) < 1 ? "" : whole(lo) < 1 ? `up to ${whole(hi)}` : whole(lo) === whole(hi) ? "" : `likely ${whole(lo)} to ${whole(hi)}`);
-const SUPPLY_NAME = { saline: "Saline bags", kits: "Test kits", beds: "Hospital beds" };
+const SUPPLY_NAME = { saline: "Saline bags", kits: "Test kits", beds: "Extra (surge) beds" };
 
 async function copyText(text) {
   try { await navigator.clipboard.writeText(text); return true; } catch { /* insecure context / denied */ }
@@ -140,7 +140,7 @@ export function mountDispatch(root, st) {
     root.querySelector("[data-settings]").innerHTML =
       chip("Stock", `${se.stock_pct}% · ${se.pool}`, "resources", "Available regional stock and pool. Change it in Resources.") +
       chip("Crews pool", `${se.crews_total}${se.floor_pct ? ` · floor ${se.floor_pct}%` : ""}`, "resources", "Total spraying crews. Change it in Resources.") +
-      chip("Beds", `${se.capacity_pct}% of local beds · ${se.basis === "surge" ? "bad week" : "normal week"}`, "hospitals", "Bed capacity scale, and whether beds are planned for a bad week. Change it in Hospitals.") +
+      chip("Beds", `${se.capacity_pct}% of regular beds · ${se.basis === "surge" ? "bad week" : "normal week"}`, "hospitals", "Bed capacity scale, and whether beds are planned for a bad week. Change it in Hospitals.") +
       chip("Crew impact", data.plan === "none" ? "off" : data.plan === "allocation" ? `allocated crews · ${se.sim?.effect_pct ?? s.effect}%` : `simulator plan · ${se.sim?.crews ?? 0} crews`,
         "simulator", "Model counterfactual of the crews. Build a plan in Simulator.");
     renderSide(c);
