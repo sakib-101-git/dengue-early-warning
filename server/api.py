@@ -25,6 +25,7 @@ from fastapi.staticfiles import StaticFiles
 
 from src.config import HORIZONS, METRICS_JSON, TEST_YEARS, TIER_LABELS
 from src.predict import BREEDING, OLDER, RiskEngine
+from src import hospitals as hosp
 from src import resources as res
 
 log = logging.getLogger("dengue_watch")
@@ -128,6 +129,11 @@ class State:
         except Exception:  # noqa: BLE001 - no cache and no supply columns: allocation is disabled
             log.exception("Supply rates unavailable")
             self.rates = None
+        try:
+            self.bed_capacity = hosp.baseline_capacity(raw, self.rates)
+        except Exception:  # noqa: BLE001 - neither the bed column nor a bed rate: overflow is disabled
+            log.exception("Bed capacity unavailable")
+            self.bed_capacity = None
 
     def _same_week_last_year_mae(self) -> float:
         r = self.engine.raw.sort_values(["ward_id", "date"])
@@ -356,11 +362,11 @@ def model(h: int = 3):
 
 
 # ---------------------------------------------------------------- Phase 2: resource allocation
-def check_scope(scope: str) -> str:
+def check_scope(scope: str, name: str = "scope") -> str:
     if scope.lower() == "all":
         return "all"
     if scope not in S().wards:
-        raise HTTPException(400, f"Unknown scope '{scope}'. Use 'all' or one of: {', '.join(S().cities)}.")
+        raise HTTPException(400, f"Unknown {name} '{scope}'. Use 'all' or one of: {', '.join(S().cities)}.")
     return scope
 
 
@@ -436,6 +442,55 @@ def allocation(scope: str = "all", date: Date | None = None, h: int = 3, stock_p
     if floor not in res.FLOOR_OPTIONS:
         raise HTTPException(400, f"floor must be one of {', '.join(map(str, res.FLOOR_OPTIONS))} (got {floor}).")
     return _allocation_payload(scope, S().snap(h, date), h, stock_pct, crews, floor)
+
+
+# ---------------------------------------------------------------- Phase 2: hospital surge + overflow
+def ward_beds_json(r) -> dict:
+    return {
+        "ward": r.ward_id, "label": short_ward(r.ward_id), "city": r.city, "tier": r.tier,
+        "expected": num(r.expected_cases), "high_80": num(r.high_80),
+        "baseline_capacity": int(r.baseline_capacity), "capacity": int(r.capacity),
+        "demand": int(r.demand), "demand_expected": int(r.demand_expected), "demand_surge": int(r.demand_surge),
+        "deficit": int(r.deficit), "headroom": int(r.headroom), "utilisation": num(r.utilisation, 4),
+        "sent": int(r.sent), "received": int(r.received), "load_after": int(r.load_after),
+        "net_deficit": int(r.net_deficit), "headroom_after": int(r.headroom_after),
+        "utilisation_after": num(r.utilisation_after, 4), "status": r.status,
+        "can_receive": r.tier not in hosp.NO_RECEIVE_TIERS,
+    }
+
+
+@lru_cache(maxsize=256)
+def _overflow_payload(city: str, issue: pd.Timestamp, h: int, cap: int, basis: str) -> dict:
+    rates = need_rates()
+    if S().bed_capacity is None:
+        raise HTTPException(503, "Bed capacity is unavailable: the dataset has no bed column and no bed rate.")
+    plan = hosp.plan_overflow(scope_forecast(city, issue, h), S().bed_capacity, rates, cap, basis)
+    d = plan["wards"].sort_values(["city", "utilisation", "ward_id"], ascending=[True, False, True], kind="mergesort")
+    cities = [{"city": c, **v} for c, v in plan["cities"].items()]
+    tot = {k: sum(c[k] for c in cities) for k in ("n_wards", "demand", "capacity", "overflow_before", "wards_over",
+                                                  "transferred", "unresolved", "wards_unresolved", "headroom_before",
+                                                  "remaining_headroom", "headroom_reserved")}
+    tot["utilisation"] = round(tot["demand"] / tot["capacity"], 4) if tot["capacity"] else 0.0
+    return {
+        "city": city, "scope_label": "All cities" if city == "all" else city,
+        "horizon": h, "issue_date": iso(issue), "target_date": iso(issue + pd.Timedelta(weeks=h)),
+        "capacity_pct": cap, "basis": basis, "k_beds": rates["supplies"]["beds"]["k"],
+        "totals": tot, "cities": cities,
+        "transfers": [{**t, "from_label": short_ward(t["from"]), "to_label": short_ward(t["to"])} for t in plan["transfers"]],
+        "wards": [ward_beds_json(r) for r in d.itertuples()],
+        "capacity_rule": hosp.CAPACITY_RULE, "routing_rule": hosp.ROUTING_RULE,
+    }
+
+
+@app.get("/api/overflow")
+def overflow(city: str = "all", date: Date | None = None, h: int = 3, capacity_pct: int = 100,
+             basis: str = "expected"):
+    city = check_scope(city, "city")
+    check_h(h)
+    check_range("capacity_pct", capacity_pct, *hosp.CAPACITY_RANGE)
+    if basis not in hosp.BASES:
+        raise HTTPException(400, f"basis must be one of {', '.join(hosp.BASES)} (got '{basis}').")
+    return _overflow_payload(city, S().snap(h, date), h, capacity_pct, basis)
 
 
 @app.get("/api/{rest:path}")
