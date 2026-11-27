@@ -11,6 +11,7 @@ from __future__ import annotations
 import bisect
 import json
 import logging
+import mimetypes
 from contextlib import asynccontextmanager
 from datetime import date as Date
 from functools import lru_cache
@@ -32,9 +33,17 @@ from src import simulator as sim
 
 log = logging.getLogger("dengue_watch")
 WEB_DIR = Path(__file__).resolve().parents[1] / "web"
+mimetypes.add_type("font/woff2", ".woff2")   # not in every OS mime table (e.g. Windows)
 
 DEFAULTS = {"city": "Dhaka North", "ward": "DNCC_Ward_01", "h": 3, "date": "2025-07-07"}
 RAIN_WEEKS = 12  # weeks of rainfall shown in the ward hero
+
+# Response caches: every one is a bounded LRU, sized so that all of them full add < ~50 MB to the
+# ~330 MB the app needs after startup (Render free tier: 512 MB). Measured retained size per entry
+# (tracemalloc): ward 40 KB, city 9, heatmap 106, allocation 124, overflow 74, simulator curves 386,
+# simulate 87, rank 19-60, dispatch 79. Everything except the curves (~0.5 s) recomputes in milliseconds.
+CACHE = {"ward": 128, "city": 128, "heatmap": 64, "allocation": 64, "overflow": 64, "curves": 16,
+         "simulate": 64, "rank": 64, "dispatch": 64}
 
 # Tier colours used by the frontend (light / dark). Kept here so the UI never invents its own scale.
 TIER_COLORS = {
@@ -223,9 +232,52 @@ def forecast_json(fc) -> dict:
 
 
 # ---------------------------------------------------------------- endpoints
+# Files the app needs to run with no network at all: models, data, supply rates and the vendored
+# front-end assets (charts library + fonts). Nothing else is fetched at runtime.
+VENDORED = ("vendor/echarts.min.js", "vendor/fonts/Geist-Variable.woff2", "vendor/fonts/GeistMono-Variable.woff2")
+
+
+def _versions() -> dict:
+    import platform
+    from importlib.metadata import PackageNotFoundError, version
+    out = {"python": platform.python_version()}
+    for pkg in ("numpy", "pandas", "scikit-learn", "lightgbm", "fastapi", "uvicorn"):
+        try:
+            out[pkg] = version(pkg)
+        except PackageNotFoundError:  # pragma: no cover
+            out[pkg] = None
+    return out
+
+
+@lru_cache(maxsize=1)
+def _static_health() -> dict:
+    """Checks that cannot change while the process runs (computed once)."""
+    from src.config import MODELS_DIR, RAW_CSV, RESOURCE_RATES_JSON
+    models = {f"h{h}": (MODELS_DIR / f"model_h{h}.joblib").is_file() for h in HORIZONS}
+    assets = {p: (WEB_DIR / p).is_file() for p in ("index.html", "styles.css", "js/app.js", *VENDORED)}
+    return {"models": models, "data_file": RAW_CSV.name if RAW_CSV.is_file() else None,
+            "rates_file": RESOURCE_RATES_JSON.is_file(), "assets": assets, "versions": _versions()}
+
+
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "ready": STATE is not None}
+    """Liveness + offline readiness. offline_ready = every component loaded from local files, so
+    forecasting, allocation, routing, simulation and dispatch all work with the network unplugged.
+    (UptimeRobot pings GET / or this endpoint; both stay plain 200s.)"""
+    st = _static_health()
+    s = STATE
+    components = {
+        "models": s is not None and all(st["models"].values()) and len(s.engine.bundles) == len(HORIZONS),
+        "data": s is not None and len(s.ward_city) == 60,
+        "forecast_tables": s is not None and all(len(t) for t in s.tables.values()),
+        "supply_rates": s is not None and s.rates is not None,
+        "bed_capacity": s is not None and s.bed_capacity is not None,
+        "web_assets": all(st["assets"].values()),
+        "dispatch_templates": True,   # pure Python string templates (src/dispatch.py), no network or LLM
+    }
+    return {"status": "ok", "ready": s is not None, "offline_ready": all(components.values()),
+            "components": components, "data_file": st["data_file"], "assets": st["assets"],
+            "versions": st["versions"]}
 
 
 @app.get("/api/meta")
@@ -243,7 +295,7 @@ def meta():
     }
 
 
-@lru_cache(maxsize=512)
+@lru_cache(maxsize=CACHE["ward"])
 def _ward_payload(ward: str, issue: pd.Timestamp, h: int, rain: int, temp: int, hum: int) -> dict:
     s = S()
     e = s.engine
@@ -291,7 +343,7 @@ def ward(ward: str = Query(...), date: Date | None = None, h: int = 3,
     return _ward_payload(ward, issue, h, rain, temp, hum)
 
 
-@lru_cache(maxsize=256)
+@lru_cache(maxsize=CACHE["city"])
 def _city_payload(city: str, issue: pd.Timestamp, h: int) -> dict:
     t = S().tables[h]
     now = t[(t.city == city) & (t.issue_date == issue)].sort_values("expected_cases", ascending=False)
@@ -313,7 +365,7 @@ def city(city: str = Query(...), date: Date | None = None, h: int = 3):
     return _city_payload(city, S().snap(h, date), h)
 
 
-@lru_cache(maxsize=128)
+@lru_cache(maxsize=CACHE["heatmap"])
 def _heatmap_payload(city: str, year: int, h: int) -> dict:
     t = S().tables[h]
     hm = t[(t.city == city) & (t.target_date.dt.year == year)]
@@ -398,7 +450,7 @@ def supply_json(r, key: str) -> dict:
             "coverage": round(float(getattr(r, f"{key}_coverage")), 4)}
 
 
-@lru_cache(maxsize=256)
+@lru_cache(maxsize=CACHE["allocation"])
 def _allocation_payload(scope: str, issue: pd.Timestamp, h: int, stock: int, crews: int, floor: int) -> dict:
     rates = need_rates()
     plan = res.allocate(scope_forecast(scope, issue, h), S().profiles, rates, stock, crews, floor)
@@ -463,7 +515,7 @@ def ward_beds_json(r) -> dict:
     }
 
 
-@lru_cache(maxsize=256)
+@lru_cache(maxsize=CACHE["overflow"])
 def _overflow_payload(city: str, issue: pd.Timestamp, h: int, cap: int, basis: str) -> dict:
     rates = need_rates()
     if S().bed_capacity is None:
@@ -552,7 +604,7 @@ def parse_crews(value) -> tuple[tuple[str, int], ...]:
     return tuple(sorted(out.items()))
 
 
-@lru_cache(maxsize=64)
+@lru_cache(maxsize=CACHE["curves"])
 def _curves(issue: pd.Timestamp, effect: int) -> sim.Curves:
     """All wards x h2-h4 x crew levels for one issue week: one batched model run, then lookups."""
     return sim.Curves(sim.response_curves(S().engine, issue, effect), effect)
@@ -570,7 +622,7 @@ def sim_common(scope: str, issue: pd.Timestamp, effect: int, cv: sim.Curves) -> 
             "method": sim.METHOD}
 
 
-@lru_cache(maxsize=256)
+@lru_cache(maxsize=CACHE["simulate"])
 def _simulate_payload(scope: str, issue: pd.Timestamp, effect: int, crews: tuple, auto: int | None) -> dict:
     rates = need_rates()
     cv = _curves(issue, effect)
@@ -638,7 +690,7 @@ def simulate_post(body: dict = Body(default_factory=dict)):
                              check_auto(auto))
 
 
-@lru_cache(maxsize=128)
+@lru_cache(maxsize=CACHE["rank"])
 def _rank_payload(scope: str, issue: pd.Timestamp, effect: int) -> dict:
     cv = _curves(issue, effect)
     d = sim.rank(cv, list(scope_wards(scope)))
@@ -673,7 +725,7 @@ def dispatch_plan(plan: str, alloc: dict) -> tuple:
     return parse_crews(plan)
 
 
-@lru_cache(maxsize=128)
+@lru_cache(maxsize=CACHE["dispatch"])
 def _dispatch_payload(scope: str, ident: str, issue: pd.Timestamp, h: int, stock: int, crews: int, floor: int,
                       cap: int, basis: str, pool: str, plan: str, effect: int, sim_issue: pd.Timestamp,
                       method: bool | None = None) -> dict:
@@ -734,4 +786,23 @@ def api_404(rest: str):
     raise HTTPException(404, f"No API endpoint /api/{rest}")
 
 
-app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")
+class WebFiles(StaticFiles):
+    """Static UI with explicit caching.
+
+    The app's own files (index.html, styles.css, js/*) change with every deploy and are ES modules that
+    import each other, so they are served with `Cache-Control: no-cache`: the browser keeps a copy but
+    revalidates it (ETag / Last-Modified -> 304) on every load, so an update is never stuck behind a
+    stale module. Vendored third-party files (vendor/: ECharts, fonts) only change when the vendored
+    version is bumped and may be cached for a week.
+    """
+    VENDOR_MAX_AGE = 7 * 24 * 3600
+
+    async def get_response(self, path: str, scope):
+        resp = await super().get_response(path, scope)
+        p = path.replace("\\", "/").lstrip("./")
+        resp.headers["Cache-Control"] = (f"public, max-age={self.VENDOR_MAX_AGE}" if p.startswith("vendor/")
+                                         else "no-cache")
+        return resp
+
+
+app.mount("/", WebFiles(directory=WEB_DIR, html=True), name="web")
