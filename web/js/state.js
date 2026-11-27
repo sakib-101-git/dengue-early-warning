@@ -1,7 +1,7 @@
 // App state <-> URL. Every view is shareable and the back button works.
-const KEYS = ["view", "city", "ward", "h", "date", "rain", "temp", "hum", "year", "scope", "stock", "crews", "floor", "cap", "basis", "effect", "deploy"];
+const KEYS = ["view", "city", "ward", "h", "date", "rain", "temp", "hum", "year", "scope", "stock", "crews", "floor", "cap", "basis", "effect", "deploy", "dscope", "tab", "dplan", "dmethod"];
 const NUMERIC = new Set(["h", "rain", "temp", "hum", "year", "stock", "crews", "floor", "cap", "effect"]);
-const VIEWS = ["ward", "city", "model", "resources", "hospitals", "simulator"];
+const VIEWS = ["ward", "city", "model", "resources", "hospitals", "simulator", "dispatch"];
 // Resources defaults: a scarce-but-workable scenario so the allocation engine has something to do.
 export const RES_DEFAULTS = { scope: "all", stock: 60, crews: 40, floor: 0 };
 // Hospitals defaults: assumed capacity as derived (100%), planning for surge demand (upper end of the forecast).
@@ -9,6 +9,9 @@ export const HOSP_DEFAULTS = { cap: 100, basis: "surge" };
 // Simulator defaults: 10% water-logging cut per crew, no crews deployed yet.
 export const SIM_DEFAULTS = { effect: 10, deploy: "" };
 export const MAX_CREWS_PER_WARD = 20;
+// Dispatch defaults: a ward notice, SMS tab, crew impact of the crews Resources assigned.
+// dmethod: "" = brief method page by scope (on for city, off for ward); "1" / "0" = the user's choice.
+export const DISPATCH_DEFAULTS = { dscope: "ward", tab: "sms", dplan: "alloc", dmethod: "" };
 
 /** "DNCC_Ward_01:2,DSCC_Ward_03:1" <-> { DNCC_Ward_01: 2, DSCC_Ward_03: 1 } (sorted, zeros dropped). */
 export function decodeDeploy(text) {
@@ -24,7 +27,7 @@ export const encodeDeploy = (plan) =>
   Object.keys(plan).filter((w) => plan[w] > 0).sort().map((w) => `${w}:${plan[w]}`).join(",");
 
 const listeners = new Set();
-export const state = { view: "ward", city: "", ward: "", h: 3, date: "", rain: 0, temp: 0, hum: 0, year: 0, ...RES_DEFAULTS, ...HOSP_DEFAULTS, ...SIM_DEFAULTS };
+export const state = { view: "ward", city: "", ward: "", h: 3, date: "", rain: 0, temp: 0, hum: 0, year: 0, ...RES_DEFAULTS, ...HOSP_DEFAULTS, ...SIM_DEFAULTS, ...DISPATCH_DEFAULTS };
 let meta = null;
 
 export function initState(m) {
@@ -74,6 +77,10 @@ function sanitize() {
   // crews only count inside the current scope, so the impact always matches the ranking shown
   for (const w of Object.keys(plan)) if (!known.has(w) || (state.scope !== "all" && cityOf[w] !== state.scope)) delete plan[w];
   state.deploy = encodeDeploy(plan);
+  if (!["ward", "city"].includes(state.dscope)) state.dscope = DISPATCH_DEFAULTS.dscope;
+  if (!["sms", "whatsapp", "brief"].includes(state.tab)) state.tab = DISPATCH_DEFAULTS.tab;
+  if (!["alloc", "sim", "off"].includes(state.dplan)) state.dplan = DISPATCH_DEFAULTS.dplan;
+  state.dmethod = ["0", "1"].includes(String(state.dmethod)) ? String(state.dmethod) : "";
 }
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, Number(v) || 0));
@@ -86,7 +93,7 @@ function toUrl() {
   const q = new URLSearchParams();
   q.set("view", state.view);
   q.set("city", state.city);
-  if (state.view === "ward") q.set("ward", state.ward);
+  if (state.view === "ward" || (state.view === "dispatch" && state.dscope === "ward")) q.set("ward", state.ward);
   q.set("h", String(state.h));
   if (state.view !== "model") q.set("date", state.date);
   if (state.view === "ward") for (const k of ["rain", "temp", "hum"]) if (state[k]) q.set(k, String(state[k]));
@@ -98,6 +105,14 @@ function toUrl() {
   if (state.view === "hospitals") { q.set("scope", state.scope); q.set("cap", String(state.cap)); q.set("basis", state.basis); }
   if (state.view === "simulator") {
     q.set("scope", state.scope); q.set("effect", String(state.effect));
+    if (state.deploy) q.set("deploy", state.deploy);
+  }
+  if (state.view === "dispatch") {
+    q.set("dscope", state.dscope); q.set("tab", state.tab); q.set("dplan", state.dplan);
+    if (state.dmethod) q.set("dmethod", state.dmethod);
+    q.set("scope", state.scope); q.set("stock", String(state.stock)); q.set("crews", String(state.crews));
+    if (state.floor) q.set("floor", String(state.floor));
+    q.set("cap", String(state.cap)); q.set("basis", state.basis); q.set("effect", String(state.effect));
     if (state.deploy) q.set("deploy", state.deploy);
   }
   return `${location.pathname}?${q}`;

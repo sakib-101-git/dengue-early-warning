@@ -322,3 +322,84 @@ lookups of about 3 ms.
 
 **Limits (stated in the UI).** This is the model's counterfactual, not a field trial. The dataset
 has no intervention history, so the per-crew effect `e` is an assumption the user can adjust.
+
+### 7.4 Multi-channel dispatch (`src/dispatch.py`, `GET /api/dispatch`, `python -m src.export_samples`)
+
+**Numbers are never recomputed.** A notice is rendered from the same cached payloads that serve
+`/api/allocation`, `/api/overflow` and `/api/simulate`. Allocation uses the ward's city as the stock
+pool (`pool=city`) or all 60 wards (`pool=all`, the Resources default). Overflow always uses the
+ward's own city. Tests check every ward's supplies, flags, crews, bed demand/capacity and transfers
+against those endpoints.
+
+**Deterministic templates, no LLM, no network.** Plain Python f-strings and rule-based actions.
+Actions are ranked most urgent first: unplaced bed patients, critical resupply, outgoing transfers,
+the tier response, crew shortfall, incoming transfers, then routine top-ups. The same input gives the
+same text. The only clock-dependent line is the brief's "Generated" stamp, and callers can fix it.
+
+**Written for non-technical readers.** The notices go to councillors and ward health officers, so the
+human-facing text follows fixed writing rules. The JSON context keeps every engine number unchanged.
+- Cases are whole numbers, with the forecast range in words: "about 9 cases (likely 5 to 14)",
+  "fewer than 1 case", "up to 3". No q10/q90, issue week, priority rank or other internal terms.
+- Supplies are shown as need / getting / short. The official flags `CRITICAL DEFICIT` and `WARNING`
+  stay, but each is followed by one sentence on what it means and one on why the ward is short,
+  e.g. "Stock this week covers 60% of what all 60 wards need; it went first to 33 wards with more
+  risk or crowding." (33 = the ward's priority rank - 1.)
+- One bed story per ward: patients who may need a bed (in a bad week when beds are planned on the
+  upper forecast) vs the ward's local beds, transfers in/out by ward name, and whether the rest of the
+  city is full.
+- At most 3 actions, each with a verb, an amount and a deadline. Deadline = the Monday before the
+  forecast week, but never sooner than 3 days after the data date (`dispatch.deadline`).
+- Every ward and city context carries `summary` (the "In short" text), `reasons`, `bed_story`,
+  `deadline` and actions as `{key, text, sms, chat}`, so the UI shows exactly what was sent.
+
+**Channels.**
+- **SMS.** GSM-7 only: any other character is transliterated (`–` to `-`, `→` to `->`), so a message
+  never silently switches to UCS-2 at 70 characters per segment. Length is counted the way a phone
+  counts it: 160 septets for one segment, 153 per segment when concatenated, and extension
+  characters (`^ { } [ ] ~ \ |` and the euro sign) take 2. The target is **1 segment (160)**:
+  ward, cases and range, the biggest shortage, and one action with a deadline, signed
+  "-Dengue Watch". A second segment (306 in all) is used only for an extra critical fact (a bed
+  transfer, a patient with no bed, or no crew for a Critical ward). The flag word itself is left to
+  WhatsApp and the brief, where there is room for its meaning and reason. Tests check that all 60
+  wards fit 2 segments on four weeks at 30% and 100% stock with 50% bed capacity, and that at least
+  80% fit 1 segment at default settings (100% at the API defaults, about 97% in the UI scenario).
+  The UI recounts live while the user edits.
+- **WhatsApp.** A scannable chat message of about 15 lines: a status dot (red critical, orange
+  warning, green ok), then *What to expect*, *Supplies: need / getting* (with flag, meaning and
+  reason), *Hospital beds*, *Spraying crews* (plus the simulated impact), *Please do by <date>* with
+  up to 3 numbered actions, and a sign-off with the forecast and data dates. No number is repeated.
+- **Brief.** Self-contained A4 HTML with inline CSS, system fonts and no external URL (a test checks
+  this). Page 1 is for decision makers: title and week, a highlighted "In short", four big figures
+  (expected cases, lowest supply coverage, beds, crews), a Need / Getting / Short table, the flag
+  with its reason, the bed story, a tick-box "What to do" list, Prepared by / Approved by / Date
+  lines and a one-line footer. City briefs add the 8 most urgent wards (sorted by shortages, beds,
+  crews, then risk) and the transfers as "Ward A → Ward B: 2 patients". An optional page 2, "How
+  these numbers were made", explains the forecast, stock rule, bed-capacity assumption, crew
+  assumption and limits in plain words. It is on by default for city briefs and off for ward
+  briefs (`method=1|0`, the "Include method page" toggle in the UI). Rows never split across pages;
+  colour is used only for status, so it prints in grayscale. A ward brief fits on one page.
+
+**Alerts.** A ward with any supply below 100% always gets its flag (`CRITICAL DEFICIT` for
+High/Critical tier, else `WARNING`) with meaning and reason in WhatsApp and the brief, and its
+shortage in the SMS. A ward still over bed capacity after routing gets a `BED OVERFLOW` alert, and
+every channel says how many patients may have no bed.
+
+**Crew impact (optional).** `plan=allocation` runs the simulator counterfactual for exactly the crews
+Resources assigned. `plan=WARD:n,...` uses a Simulator plan. With no plan, the impact section is
+left out.
+
+**API.** `GET /api/dispatch?scope=ward|city&id=&date=&h=&stock_pct=&crews=&floor=&capacity_pct=&basis=&pool=&plan=&effect=&method=0|1&format=sms|whatsapp|brief|json`.
+Every parameter is validated (400 with one sentence) and dates are clamped. Responses are cached per
+parameter set, take about 20–90 ms cold and are served as text/plain, text/html or JSON.
+
+**Exports.** `python -m src.export_samples` builds the demo scenario (issue 2025-07-07, h = 3, 60%
+stock, 40 crews, surge beds, 100% capacity, crew impact of the allocated crews). For each city it
+writes the top 3 priority wards plus the first ward with a supply deficit, and a city summary:
+`sms/*.txt`, `whatsapp/*.txt`, `briefs/*.html`, plus `allocation_plan.csv` (all 60 wards) and
+`overflow_routes.csv`. City briefs include the method page and ward briefs do not. File names
+keep only letters, digits, `-` and `_`, so they are safe on Windows.
+
+**Header nav.** With seven views the tabs no longer fit beside the logo below about 1,000 px. The
+logo never wraps; when the tabs overflow, the strip scrolls sideways with an edge fade on the side
+that hides more tabs, and the active tab is scrolled into view (`fitNav` in `web/js/app.js`). At
+full width it looks as before.

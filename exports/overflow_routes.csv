@@ -1,0 +1,3 @@
+order,city,from_ward,to_ward,patients,issue_date,target_date,basis,capacity_pct
+1,Chattogram,CCC_Ward_07,CCC_Ward_08,1,2025-07-07,2025-07-28,surge,100
+2,Chattogram,CCC_Ward_09,CCC_Ward_03,1,2025-07-07,2025-07-28,surge,100

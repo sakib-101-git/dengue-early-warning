@@ -144,9 +144,9 @@ svg { display: block; }
 }
 .topbar__inner {
   max-width: var(--maxw); margin: 0 auto; height: 64px; padding: 0 var(--s5);
-  display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: var(--s4);
+  display: grid; grid-template-columns: 1fr minmax(0, auto) 1fr; align-items: center; gap: var(--s4);
 }
-.brand { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; justify-self: start; border-radius: 8px; }
+.brand { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; justify-self: start; border-radius: 8px; white-space: nowrap; flex-shrink: 0; }
 .brand__mark { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center;
                background: var(--accent); color: #fff; box-shadow: inset 0 -1px 0 rgba(0,0,0,.18), 0 1px 2px rgba(0,0,0,.08); }
 [data-theme="dark"] .brand__mark { color: #06262E; }
@@ -181,6 +181,14 @@ svg { display: block; }
 .seg--nav .seg__thumb { background: var(--nav-thumb); box-shadow: 0 1px 2px rgba(0,0,0,.2), 0 4px 12px -4px rgba(0,0,0,.25); }
 .seg--nav .seg__item { min-width: 76px; }
 .seg--nav .seg__item[aria-current="page"] { color: var(--nav-thumb-ink); }
+/* When the tabs do not fit (mid widths and phones) the strip scrolls sideways instead of overlapping
+   the logo; app.js sets .is-scroll and fades whichever edge has more tabs behind it. */
+.seg--nav { min-width: 0; max-width: 100%; justify-self: center; }
+.seg--nav.is-scroll { grid-auto-columns: max-content; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; scroll-behavior: smooth; }
+.seg--nav.is-scroll::-webkit-scrollbar { display: none; }
+.seg--nav.fade-r { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent); }
+.seg--nav.fade-l { -webkit-mask-image: linear-gradient(to right, transparent, #000 32px); mask-image: linear-gradient(to right, transparent, #000 32px); }
+.seg--nav.fade-l.fade-r { -webkit-mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent); mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent); }
 .seg--ctl { height: 40px; border-radius: var(--r-ctl); width: 100%; }
 .seg--ctl .seg__thumb { border-radius: 7px; }
 .seg--ctl .seg__item { height: 32px; border-radius: 7px; padding: 0 10px; }
@@ -595,8 +603,7 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
 @media (max-width: 760px) {
   .topbar__inner { grid-template-columns: auto minmax(0, 1fr) auto; padding: 0 var(--s4); gap: var(--s3); }
   /* more views than fit on a phone: the nav scrolls sideways instead of widening the page */
-  .seg--nav { justify-self: center; max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; grid-auto-columns: max-content; }
-  .seg--nav::-webkit-scrollbar { display: none; }
+  .seg--nav { grid-auto-columns: max-content; }
   .seg--nav .seg__item { min-width: 0; padding: 0 12px; }
   .brand__name { display: none; }
   .page { padding: 0 var(--s4) var(--s8); }
@@ -876,3 +883,68 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
   .sim-impact li { grid-template-columns: 1fr auto; }
   .sim-impact__h { grid-column: 1 / -1; grid-row: 2; flex-direction: row; flex-wrap: wrap; gap: 4px 12px; }
 }
+
+/* ------------------------------------------------------------------ DISPATCH: SMS / WhatsApp / brief */
+.dsp-toolbar { grid-template-columns: minmax(150px, auto) minmax(170px, 1fr) minmax(150px, 1fr) minmax(220px, auto) minmax(220px, auto); }
+.dsp-settings { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: var(--s4); padding: var(--s4) var(--s5); }
+.dsp-settings__row { display: flex; flex-wrap: wrap; gap: var(--s2); }
+.dsp-chip { display: inline-flex; flex-direction: column; gap: 1px; padding: 6px 12px; border-radius: 10px; border: 1px solid var(--line);
+  background: var(--surface-2); color: var(--ink); text-decoration: none; font-size: 13px; line-height: 1.25; transition: border-color var(--t-fast); }
+.dsp-chip span { font-size: 11.5px; color: var(--ink-3); }
+.dsp-chip b { font-weight: 500; }
+.dsp-chip:hover, .dsp-chip:focus-visible { border-color: var(--accent); }
+.dsp-plan .seg__item:disabled { opacity: .45; cursor: not-allowed; }
+
+.dsp-split { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(280px, 1fr); gap: var(--s4); align-items: start; }
+.dsp-main .card__head { flex-wrap: wrap; }
+.dsp-phone { background: var(--surface-2); border-radius: 14px; padding: var(--s4); }
+.dsp-bubble { display: block; width: 100%; max-width: 440px; border-radius: 16px 16px 16px 4px; padding: 12px 14px; font: inherit;
+  font-size: 14.5px; line-height: 1.5; color: var(--ink); background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow-1); }
+.dsp-bubble--sms { resize: vertical; min-height: 150px; }
+.dsp-bubble--sms:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.dsp-phone--wa { background: color-mix(in oklab, #25D366 9%, var(--surface-2)); }
+.dsp-bubble--wa { white-space: pre-wrap; overflow-wrap: anywhere; border-radius: 4px 16px 16px 16px; max-height: 520px; overflow-y: auto;
+  background: color-mix(in oklab, #DCF8C6 55%, var(--surface)); }
+[data-theme="dark"] .dsp-bubble--wa { background: color-mix(in oklab, #005C4B 70%, var(--surface)); }
+.dsp-bubble--wa b { font-weight: 650; }
+.dsp-count { margin-top: var(--s3); font-size: 13px; color: var(--ink-2); }
+.dsp-count b { color: var(--ink); font-weight: 600; }
+.dsp-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); margin-top: var(--s4); }
+.dsp-done { font-size: 12.5px; color: var(--accent-ink); }
+.dsp-brief { display: block; width: 100%; height: 720px; border: 1px solid var(--line); border-radius: 12px; background: #e9e9ee; }
+
+.dsp-fore { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; }
+.dsp-fore .tier, .dsp-fore .chip { align-self: center; }
+.dsp-fore b.fig { font-size: 34px; font-weight: 400; letter-spacing: -.04em; line-height: 1; }
+.dsp-fore span:last-child { font-size: 13px; color: var(--ink-2); }
+.dsp-h { font-size: 12px; font-weight: 600; color: var(--ink-3); text-transform: uppercase; letter-spacing: .05em; margin: var(--s5) 0 var(--s2); }
+.dsp-sup, .dsp-alerts { list-style: none; margin: 0; padding: 0; }
+.dsp-sup li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: var(--s3); align-items: center; padding: 5px 0; font-size: 13.5px; }
+.dsp-sup .cov { min-width: 0; }
+.dsp-sup .cov__lane { width: 48px; }
+.dsp-alerts li { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 6px 0; font-size: 13px; color: var(--ink-2); border-top: 1px solid var(--line); }
+.dsp-alerts li:first-child { border-top: 0; }
+.dsp-crews { font-size: 13.5px; color: var(--ink-2); }
+.dsp-crews b { color: var(--ink); font-weight: 600; }
+.dsp-acts { margin: 0; padding-left: 20px; font-size: 13.5px; color: var(--ink-2); display: grid; gap: 6px; }
+
+@media (max-width: 1024px) {
+  .dsp-toolbar { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .dsp-split { grid-template-columns: 1fr; }
+}
+@media (max-width: 760px) {
+  .dsp-toolbar { grid-template-columns: 1fr 1fr; }
+  .dsp-toolbar .field:first-child { grid-column: 1 / -1; }
+  .dsp-settings { padding: var(--s4); }
+  .dsp-plan, .dsp-plan .seg--ctl { width: 100%; }
+  .dsp-main .card__head .right { width: 100%; }
+  .dsp-tabs { width: 100%; }
+  .dsp-phone { padding: var(--s3); }
+  .dsp-brief { height: 560px; }
+}
+
+/* dispatch: plain-language side panel */
+.dsp-short { margin: 0 0 var(--s4); padding: 10px 12px; border-left: 3px solid var(--accent); background: var(--surface-2); border-radius: 0 8px 8px 0; font-size: 13.5px; line-height: 1.5; color: var(--ink-2); }
+.dsp-short b { color: var(--ink); }
+.dsp-check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink-2); cursor: pointer; white-space: nowrap; }
+.dsp-check input { width: 16px; height: 16px; accent-color: var(--accent); margin: 0; }

@@ -73,6 +73,11 @@ Three views, switched from the top bar; every view's settings live in the URL, s
   - Per-ward crew steppers, or **auto-deploy N crews** by greedy marginal ROI.
   - Shows cases prevented, bed-weeks freed, saline bags saved and **ROI (cases prevented per crew)**, plus a without-vs-with-crews chart for each forecast week and per-ward impact.
   - An **intervention ROI ranking** of every ward by cases one crew prevents.
+- **Dispatch (multi-channel notices):**
+  - Ward or city notices as **SMS** (GSM-7, 1 segment for most wards and never more than 2, with a live character and segment counter), **WhatsApp** (a short chat message with *bold* section titles and a status dot) and a **printable A4 brief** (Print, then Save as PDF). A ward brief fits on one page; city briefs add a plain-language "How these numbers were made" page (a toggle switches it on or off).
+  - Written for non-technical readers: whole numbers ("about 9 cases, likely 5 to 14"), need vs getting for saline, test kits and beds, the official CRITICAL DEFICIT / WARNING flag followed by what it means and *why* the ward is short, one plain story about hospital beds and transfers, and at most 3 actions, each with an amount and a deadline (the Monday before the forecast week). It can also show the simulator's estimate of cases prevented by the assigned crews.
+  - Built from fixed templates over the same payloads as Resources, Hospitals and Simulator, so the numbers always match. There is no AI model or network call. Copy and download buttons are included.
+  - `python -m src.export_samples` writes sample notices, briefs, `allocation_plan.csv` and `overflow_routes.csv` to [`exports/`](exports/).
 
 ## Results (held-out test 2024–2025, never used for training or tuning)
 
@@ -104,6 +109,9 @@ src/experiments.py         ensembles / tuning / neural-net comparison
 src/resources.py           supply rates, ward priority, scarce-stock greedy allocation, crews
 src/hospitals.py           assumed bed capacity, ward deficits, greedy intra-city overflow routing
 src/simulator.py           vector-control counterfactual: water-logging cut -> model re-run, ROI ranking, auto-deploy
+src/dispatch.py            plain-language SMS (GSM-7, 1-2 segments) / WhatsApp / printable HTML brief templates
+src/export_samples.py      writes exports/: sample notices, briefs, allocation_plan.csv, overflow_routes.csv
+exports/                   committed sample dispatch exports (demo week 2025-07-07, 3 weeks ahead)
 server/api.py              FastAPI JSON API over the RiskEngine + serves web/
 server/__main__.py         `python -m server` launcher (uvicorn, opens the browser)
 web/index.html             app shell (top bar, navigation, theme toggle)
@@ -118,6 +126,7 @@ tests/test_data.py         onsite dataset = Phase 1 dataset + supply columns (fo
 tests/test_resources.py    allocation: rates, priority, conservation, Critical-first, flags, crews, 400s
 tests/test_hospitals.py    overflow: capacity rule, no cross-city transfers, sent = received, utilisation maths
 tests/test_simulator.py    simulator: rebuild equivalence, 0 crews = baseline, more crews never raise cases, ranking, auto-deploy
+tests/test_dispatch.py     dispatch: SMS segment budget for all wards, numbers match allocation/overflow/simulate, flags + reasons, plain wording, offline brief, 400s
 ```
 
 ## Tech stack
@@ -143,7 +152,7 @@ tests/test_simulator.py    simulator: rebuild equivalence, 0 crews = baseline, m
 | Tool / API | Used for |
 |---|---|
 | Claude (Anthropic, claude.ai) | Planning, exploring the data, drafting code for the feature pipeline, training script, inference engine and dashboard, and drafting documentation. The team reviewed, ran, tested and modified all code and can explain it. |
-| Claude Code (Anthropic) | Building the web frontend (server/, web/), API tests and the Streamlit restyle. In Phase 2, drafting the resource allocation, hospital overflow and vector-control simulator engines, their APIs, tests and the Resources, Hospitals and Simulator views. The team reviewed, ran and tested all changes. |
+| Claude Code (Anthropic) | Building the web frontend (server/, web/), API tests and the Streamlit restyle. In Phase 2, drafting the resource allocation, hospital overflow, vector-control simulator and dispatch-notice engines, their APIs, tests, sample exports and the Resources, Hospitals, Simulator and Dispatch views. The team reviewed, ran and tested all changes. |
 
 **External APIs at runtime: none.** The app makes no network calls and uses no LLM.
 

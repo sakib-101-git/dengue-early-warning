@@ -4,13 +4,14 @@ import { disposeAll, rethemeAll } from "./charts.js";
 import { getMeta, initState, setState, state, subscribe } from "./state.js";
 import { errorBox, placeThumb, reducedMotion, watchSeg } from "./ui.js";
 import { mountCity } from "./views/city.js";
+import { mountDispatch } from "./views/dispatch.js";
 import { mountModel } from "./views/model.js";
 import { mountHospitals } from "./views/hospitals.js";
 import { mountResources } from "./views/resources.js";
 import { mountSimulator } from "./views/simulator.js";
 import { mountWard } from "./views/ward.js";
 
-const VIEWS = { ward: mountWard, city: mountCity, model: mountModel, resources: mountResources, hospitals: mountHospitals, simulator: mountSimulator };
+const VIEWS = { ward: mountWard, city: mountCity, model: mountModel, resources: mountResources, hospitals: mountHospitals, simulator: mountSimulator, dispatch: mountDispatch };
 const viewEl = document.getElementById("view");
 const nav = document.querySelector(".seg--nav");
 let current = null, currentName = "";
@@ -56,14 +57,33 @@ document.querySelector(".brand").addEventListener("click", (e) => {
   setState({ view: "ward" });
 });
 
+// Tabs that do not fit scroll sideways (never overlap the logo): .is-scroll turns scrolling on, .fade-l / .fade-r
+// fade the edge that hides more tabs, and the active tab is scrolled into the middle.
+function fitNav(centre = false) {
+  nav.classList.remove("is-scroll");
+  const over = nav.scrollWidth > nav.clientWidth + 1;
+  nav.classList.toggle("is-scroll", over);
+  if (over && centre) {
+    const on = nav.querySelector('[aria-current="page"]');
+    if (on) nav.scrollTo({ left: on.offsetLeft - (nav.clientWidth - on.offsetWidth) / 2, behavior: "instant" });
+  }
+  fadeNav();
+}
+function fadeNav() {
+  const over = nav.classList.contains("is-scroll");
+  nav.classList.toggle("fade-l", over && nav.scrollLeft > 2);
+  nav.classList.toggle("fade-r", over && nav.scrollLeft + nav.clientWidth < nav.scrollWidth - 2);
+}
+nav.addEventListener("scroll", fadeNav, { passive: true });
+new ResizeObserver(() => fitNav(true)).observe(document.querySelector(".topbar__inner"));
+
 function markNav(view) {
   nav.querySelectorAll("[data-nav]").forEach((a) => {
     if (a.dataset.nav === view) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
   });
   placeThumb(nav);
-  const on = nav.querySelector('[aria-current="page"]');  // keep the active tab visible when the nav scrolls (phones)
-  if (on && nav.scrollWidth > nav.clientWidth) nav.scrollLeft = on.offsetLeft - (nav.clientWidth - on.offsetWidth) / 2;
-  document.title = `${{ ward: "Ward", city: "City", model: "Model", resources: "Resources", hospitals: "Hospitals", simulator: "Simulator" }[view]} · Dengue Watch`;
+  fitNav(true);
+  document.title = `${{ ward: "Ward", city: "City", model: "Model", resources: "Resources", hospitals: "Hospitals", simulator: "Simulator", dispatch: "Dispatch" }[view]} · Dengue Watch`;
 }
 
 function swapView(s, prev) {

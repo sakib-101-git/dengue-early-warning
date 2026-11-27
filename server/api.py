@@ -20,11 +20,12 @@ import numpy as np
 import pandas as pd
 from fastapi import Body, FastAPI, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from src.config import HORIZONS, METRICS_JSON, TEST_YEARS, TIER_LABELS
 from src.predict import BREEDING, OLDER, RiskEngine
+from src import dispatch
 from src import hospitals as hosp
 from src import resources as res
 from src import simulator as sim
@@ -655,6 +656,77 @@ def _rank_payload(scope: str, issue: pd.Timestamp, effect: int) -> dict:
 def simulate_rank(scope: str = "all", date: Date | None = None, effect: int = sim.EFFECT_DEFAULT):
     """Every ward in scope ranked by 1-crew ROI (cases prevented over h2-h4 by one crew)."""
     return _rank_payload(check_scope(scope), snap_sim(date), check_effect(effect))
+
+
+# ---------------------------------------------------------------- Phase 2: multi-channel dispatch
+DISPATCH_POOLS = ("city", "all")
+DISPATCH_MEDIA = {"sms": "text/plain; charset=utf-8", "whatsapp": "text/plain; charset=utf-8",
+                  "brief": "text/html; charset=utf-8"}
+
+
+def dispatch_plan(plan: str, alloc: dict) -> tuple:
+    """'' = no crew impact, 'allocation' = the crews Resources assigned, else a simulator plan (ward:crews,...)."""
+    if plan in ("", "none"):
+        return ()
+    if plan == "allocation":
+        return tuple(sorted((w["ward"], w["crews_assigned"]) for w in alloc["wards"] if w["crews_assigned"] > 0))
+    return parse_crews(plan)
+
+
+@lru_cache(maxsize=128)
+def _dispatch_payload(scope: str, ident: str, issue: pd.Timestamp, h: int, stock: int, crews: int, floor: int,
+                      cap: int, basis: str, pool: str, plan: str, effect: int, sim_issue: pd.Timestamp,
+                      method: bool | None = None) -> dict:
+    city = ident if scope == "city" else S().ward_city[ident]
+    alloc = _allocation_payload(city if pool == "city" else "all", issue, h, stock, crews, floor)
+    over = _overflow_payload(city, issue, h, cap, basis)
+    crew_plan = dispatch_plan(plan, alloc)
+    simp = _simulate_payload("all", sim_issue, effect, crew_plan, None) if crew_plan else None
+    out = dispatch.build(scope, ident, alloc, over, simp, method=method)
+    out["plan"] = "allocation" if plan == "allocation" else ("simulator" if crew_plan else "none")
+    return out
+
+
+@app.get("/api/dispatch")
+def dispatch_notice(scope: str = "ward", id: str = DEFAULTS["ward"], date: Date | None = None, h: int = 3,
+                    stock_pct: int = 100, crews: int = 20, floor: int = 0, capacity_pct: int = 100,
+                    basis: str = "expected", pool: str = "city", plan: str = "", effect: int = sim.EFFECT_DEFAULT,
+                    method: int | None = None, format: str = "json"):
+    """Ward or city notice as SMS / WhatsApp text, a printable HTML brief, or JSON with all three.
+
+    Numbers come from the same cached payloads as /api/allocation (scope = the city, or all wards with
+    pool=all), /api/overflow (the city) and, with plan=allocation or plan=ward:crews,..., /api/simulate.
+    method=1|0 adds or drops the brief's plain-language method page (default: on for city, off for ward).
+    """
+    if scope not in dispatch.SCOPES:
+        raise HTTPException(400, f"scope must be one of {', '.join(dispatch.SCOPES)} (got '{scope}').")
+    if format not in dispatch.FORMATS:
+        raise HTTPException(400, f"format must be one of {', '.join(dispatch.FORMATS)} (got '{format}').")
+    if scope == "ward":
+        check_ward(id)
+    else:
+        check_city(id)
+    check_h(h)
+    check_range("stock_pct", stock_pct, *res.STOCK_RANGE)
+    check_range("crews", crews, 0, 1000)
+    if floor not in res.FLOOR_OPTIONS:
+        raise HTTPException(400, f"floor must be one of {', '.join(map(str, res.FLOOR_OPTIONS))} (got {floor}).")
+    check_range("capacity_pct", capacity_pct, *hosp.CAPACITY_RANGE)
+    if basis not in hosp.BASES:
+        raise HTTPException(400, f"basis must be one of {', '.join(hosp.BASES)} (got '{basis}').")
+    if pool not in DISPATCH_POOLS:
+        raise HTTPException(400, f"pool must be one of {', '.join(DISPATCH_POOLS)} (got '{pool}').")
+    check_effect(effect)
+    if method not in (None, 0, 1):
+        raise HTTPException(400, f"method must be 0 or 1 (got {method}).")
+    plan = plan.strip()
+    if plan not in ("", "none", "allocation"):
+        plan = ",".join(f"{w}:{n}" for w, n in parse_crews(plan))   # validate + canonical cache key
+    out = _dispatch_payload(scope, id, S().snap(h, date), h, stock_pct, crews, floor, capacity_pct, basis, pool,
+                            plan, effect, snap_sim(date), None if method is None else bool(method))
+    if format == "json":
+        return out
+    return Response(out[format], media_type=DISPATCH_MEDIA[format])
 
 
 @app.get("/api/{rest:path}")
