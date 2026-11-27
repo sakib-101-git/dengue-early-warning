@@ -25,6 +25,7 @@ from fastapi.staticfiles import StaticFiles
 
 from src.config import HORIZONS, METRICS_JSON, TEST_YEARS, TIER_LABELS
 from src.predict import BREEDING, OLDER, RiskEngine
+from src import resources as res
 
 log = logging.getLogger("dengue_watch")
 WEB_DIR = Path(__file__).resolve().parents[1] / "web"
@@ -120,6 +121,13 @@ class State:
         self.by_ward = {h: {w: g for w, g in t.groupby("ward_id")} for h, t in self.tables.items()}
         self.raw_by_ward = {w: g.sort_values("date") for w, g in raw.groupby("ward_id")}
         self.baseline_mae = self._same_week_last_year_mae()
+        # Phase 2: supply rates (fitted on training years, cached JSON) + static ward profiles.
+        self.profiles = res.ward_profiles(raw)
+        try:
+            self.rates = res.load_rates(raw)
+        except Exception:  # noqa: BLE001 - no cache and no supply columns: allocation is disabled
+            log.exception("Supply rates unavailable")
+            self.rates = None
 
     def _same_week_last_year_mae(self) -> float:
         r = self.engine.raw.sort_values(["ward_id", "date"])
@@ -345,6 +353,89 @@ def model(h: int = 3):
         "thresholds": hm["tier_thresholds_cases"], "split": m["split"],
         "test_with_case_history": hm.get("test_with_case_history"),
     }
+
+
+# ---------------------------------------------------------------- Phase 2: resource allocation
+def check_scope(scope: str) -> str:
+    if scope.lower() == "all":
+        return "all"
+    if scope not in S().wards:
+        raise HTTPException(400, f"Unknown scope '{scope}'. Use 'all' or one of: {', '.join(S().cities)}.")
+    return scope
+
+
+def check_range(name: str, v: int, lo: int, hi: int) -> int:
+    if not lo <= v <= hi:
+        raise HTTPException(400, f"{name} must be between {lo} and {hi} (got {v}).")
+    return v
+
+
+def need_rates() -> dict:
+    if S().rates is None:
+        raise HTTPException(503, "Supply rates are unavailable: the onsite dataset or models/resource_rates.json is missing.")
+    return S().rates
+
+
+def scope_forecast(scope: str, issue: pd.Timestamp, h: int) -> pd.DataFrame:
+    t = S().tables[h]
+    now = t[t.issue_date == issue]
+    return now if scope == "all" else now[now.city == scope]
+
+
+def supply_json(r, key: str) -> dict:
+    return {"required": int(getattr(r, f"{key}_required")), "safety": int(getattr(r, f"{key}_safety")),
+            "allocated": int(getattr(r, f"{key}_allocated")), "deficit": int(getattr(r, f"{key}_deficit")),
+            "coverage": round(float(getattr(r, f"{key}_coverage")), 4)}
+
+
+@lru_cache(maxsize=256)
+def _allocation_payload(scope: str, issue: pd.Timestamp, h: int, stock: int, crews: int, floor: int) -> dict:
+    rates = need_rates()
+    plan = res.allocate(scope_forecast(scope, issue, h), S().profiles, rates, stock, crews, floor)
+    d = plan["wards"]
+    wards, alerts = [], []
+    for r in d.itertuples():
+        sup = {k: supply_json(r, k) for k in res.SUPPLY_KEYS}
+        row = {"priority": int(r.priority), "ward": r.ward_id, "label": short_ward(r.ward_id), "city": r.city,
+               "tier": r.tier, "expected": num(r.expected_cases), "low_80": num(r.low_80), "high_80": num(r.high_80),
+               "density": int(r.density), "density_weight": num(r.density_weight, 3), "score": num(r.score, 3),
+               "supplies": sup, "crews_needed": int(r.crews_needed), "crews_assigned": int(r.crews_assigned),
+               "flag": r.flag or None}
+        wards.append(row)
+        if r.flag:
+            short = [{"supply": k, **v} for k, v in sup.items() if v["deficit"] > 0]
+            alerts.append({
+                "level": r.flag, "ward": r.ward_id, "label": short_ward(r.ward_id), "city": r.city, "tier": r.tier,
+                "priority": int(r.priority), "short": short,
+                "message": f"{r.flag}: {short_ward(r.ward_id)}, {r.city} ({r.tier} risk). " + "; ".join(
+                    f"{rates['supplies'][x['supply']]['label'].lower()} {x['allocated']}/{x['required']} "
+                    f"({round(100 * x['coverage'])}%)" for x in short) + ".",
+            })
+    return {
+        "scope": scope, "scope_label": "All cities" if scope == "all" else scope,
+        "horizon": h, "issue_date": iso(issue), "target_date": iso(issue + pd.Timedelta(weeks=h)),
+        "stock_pct": stock, "floor_pct": floor, "n_wards": len(wards),
+        "supplies": [{**s, "k": rates["supplies"][s["key"]]["k"], "r2_test": rates["supplies"][s["key"]]["r2_test"],
+                      "mae_test": rates["supplies"][s["key"]]["mae_test"]} for s in res.SUPPLIES],
+        "totals": plan["totals"], "crews": plan["crews"],
+        "n_critical_deficit": sum(a["level"] == res.CRITICAL_DEFICIT for a in alerts),
+        "n_warning": sum(a["level"] == res.WARNING for a in alerts),
+        "alerts": alerts, "wards": wards,
+        "priority_rule": res.PRIORITY_RULE,
+        "rates_fit": {k: rates[k] for k in ("method", "fit_years", "test_years")},
+    }
+
+
+@app.get("/api/allocation")
+def allocation(scope: str = "all", date: Date | None = None, h: int = 3, stock_pct: int = 100,
+               crews: int = 20, floor: int = 0):
+    scope = check_scope(scope)
+    check_h(h)
+    check_range("stock_pct", stock_pct, *res.STOCK_RANGE)
+    check_range("crews", crews, 0, 1000)
+    if floor not in res.FLOOR_OPTIONS:
+        raise HTTPException(400, f"floor must be one of {', '.join(map(str, res.FLOOR_OPTIONS))} (got {floor}).")
+    return _allocation_payload(scope, S().snap(h, date), h, stock_pct, crews, floor)
 
 
 @app.get("/api/{rest:path}")

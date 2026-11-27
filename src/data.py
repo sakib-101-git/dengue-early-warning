@@ -22,6 +22,9 @@ REQUIRED_COLUMNS = {
     "dengue_cases": "number",
 }
 
+# Phase 2 supply columns (onsite dataset only). Optional: the Phase 1 file has none of them.
+SUPPLY_COLUMNS = ("saline_bags_needed", "diagnostic_kits_needed", "hospital_beds_required")
+
 
 def load_raw(path: str | Path = RAW_CSV) -> pd.DataFrame:
     """Read the CSV, normalise column names, validate schema, sort by ward and date."""
@@ -35,6 +38,9 @@ def load_raw(path: str | Path = RAW_CSV) -> pd.DataFrame:
     df["date"] = pd.to_datetime(df["date"])
     df["city"] = df["city"].astype(str)
     df["ward_id"] = df["ward_id"].astype(str)
+    for c in SUPPLY_COLUMNS:
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
 
     if df.duplicated(["ward_id", "date"]).any():
         raise ValueError("Duplicate (ward_id, date) rows found")

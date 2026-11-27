@@ -2,9 +2,13 @@
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-RAW_CSV = ROOT / "data" / "raw" / "dengue.csv"
+LEGACY_CSV = ROOT / "data" / "raw" / "dengue.csv"            # Phase 1 dataset (12 columns)
+ONSITE_CSV = ROOT / "data" / "raw" / "dengue_onsite.csv"     # Phase 2: same rows + 3 supply columns
+# Prefer the onsite file; fall back to the Phase 1 file so the app still starts without it.
+RAW_CSV = ONSITE_CSV if ONSITE_CSV.exists() else LEGACY_CSV
 MODELS_DIR = ROOT / "models"
 METRICS_JSON = MODELS_DIR / "metrics.json"
+RESOURCE_RATES_JSON = MODELS_DIR / "resource_rates.json"
 
 # Forecast horizons in weeks: the 2-to-4-week early-warning window from the brief.
 HORIZONS = (2, 3, 4)
