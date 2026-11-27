@@ -221,3 +221,51 @@ wasted. Tests check this conservation property at several stock levels.
 at most 60 wards. It takes about 30 ms cold, and results are cached per (scope, week, horizon,
 stock, crews, floor).
 
+### 7.2 Hospital surge and overflow routing (`src/hospitals.py`, `GET /api/overflow`)
+
+**Capacity is an assumption, stated in the UI.** The dataset has no bed-capacity column. Each ward's
+baseline capacity is `max(2, ceil(P95 of its weekly hospital_beds_required in training years ≤ 2022))`.
+That is the number of beds the ward needed in a bad-but-normal week. Baselines range from 2 to 6
+beds per ward (224 in total). A **capacity scale** slider (50–200%) multiplies the baseline:
+`capacity = max(1, round_half_up(baseline × scale))`.
+
+**Demand** for the forecast week is `round(k_beds × cases)`, using the bed rate learned in 7.1.
+- *Expected* uses the point forecast. It equals the Resources view's beds required, and a test
+  checks this.
+- *Surge* uses the upper end of the 80% range (q90), the safer figure for bed planning. The UI
+  defaults to surge; the API defaults to expected.
+
+**Per ward:** `deficit = max(demand − capacity, 0)` and `headroom = max(capacity − demand, 0)`.
+
+**Routing, per city. Patients are never routed across cities.** The steps repeat until there are
+no deficits or no usable headroom left:
+1. The sender is the ward with the largest remaining deficit.
+2. The receiver is the non-Critical ward with the most headroom, then the lowest utilisation.
+   Critical wards keep their spare beds for their own surge.
+3. Move `min(deficit, headroom)` patients from sender to receiver.
+
+Ties break by ward ID, so the plan is deterministic. There are no ward coordinates, so routing uses
+headroom and burden, not distance. A real deployment would add travel time as a tie-break.
+
+**Output.**
+- A transfer list (from, to, patients).
+- Per ward: sent, received, load after routing, net deficit after routing.
+- Per city: demand, capacity, utilisation, overflow before routing, patients transferred,
+  **unresolved overflow** and **remaining headroom** (including headroom held by Critical wards).
+
+**Invariants tested in `tests/test_hospitals.py`:**
+- Every transfer stays within one city.
+- Patients sent = patients received, both per city and overall; total load after routing = total
+  demand.
+- A ward only sends its overflow and only receives into free beds.
+- Critical wards never receive.
+- `overflow_before = transferred + unresolved` and `headroom_before = transferred + remaining`.
+- Greedy is exhaustive: it stops only when deficits or receivable headroom run out.
+
+**Example, demo week** (data up to 2025-07-07, h = 3, surge, 100% capacity): demand is 232 beds
+against 224 (104%). 10 beds are over capacity in 9 wards. Only 2 can be routed (both in
+Chattogram). 8 stay unresolved in Dhaka North and Dhaka South, which have no free non-Critical beds
+left. At 75% capacity with expected demand, all 3 overflow beds are routed.
+
+**Cost.** One request is a lookup plus a greedy pass over at most 20 wards per city. It takes about
+20 ms, and results are cached per (city, week, horizon, capacity, basis).

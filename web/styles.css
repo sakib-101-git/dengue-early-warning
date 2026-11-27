@@ -742,3 +742,81 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
 }
 @media (max-width: 420px) { .res-stats { grid-template-columns: 1fr; } }
 @media (forced-colors: active) { .cov__lane i, .res-bar i { forced-color-adjust: none; } }
+
+/* ---------------------------------------------------------------- Hospitals (bed surge + overflow routing) */
+.hos-controls { display: grid; grid-template-columns: minmax(260px, 1.5fr) minmax(240px, 1fr); gap: var(--s6); align-items: start; }
+.hos-sub { font-weight: 400; color: var(--ink-3); font-size: 12px; margin-left: 4px; }
+.flag--info { background: var(--accent-soft); color: var(--accent-ink); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent); }
+.hos-ubar.is-over i { background: var(--t-Critical); }
+
+.hos-cities { list-style: none; margin: 0; padding: 0; display: grid; }
+.hos-cities li { display: grid; grid-template-columns: minmax(120px, 170px) minmax(120px, 1fr) 128px 150px; align-items: center; gap: var(--s4);
+                 padding: 10px 0; border-top: 1px solid var(--line); }
+.hos-cities li:first-child { border-top: 0; }
+.hos-city { appearance: none; background: none; border: 0; padding: 2px 0; font: inherit; font-weight: 600; color: var(--ink); text-align: left;
+            cursor: pointer; display: flex; flex-direction: column; line-height: 1.2; border-radius: 6px; }
+.hos-city:hover:not(:disabled) { color: var(--accent-ink); }
+.hos-city:disabled { cursor: default; }
+.hos-city small { font-size: 11.5px; color: var(--ink-3); font-weight: 400; }
+.hos-city__n { font-size: 12.5px; color: var(--ink-3); text-align: right; }
+.hos-city__n b { color: var(--ink); font-weight: 600; font-size: 14px; margin-right: 4px; }
+.hos-city__x { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+.hos-city__x small { font-size: 11.5px; color: var(--ink-3); font-family: var(--mono); }
+
+.hos-lane { position: relative; display: flex; height: 10px; border-radius: 999px; background: var(--surface-3); overflow: visible; }
+.hos-lane i { display: block; height: 100%; background: var(--accent); transition: width var(--t-med) var(--ease); }
+.hos-lane i:first-child { border-radius: 999px 0 0 999px; }
+.hos-lane i:last-of-type { border-radius: 0 999px 999px 0; }
+.hos-lane i:only-of-type { border-radius: 999px; }
+.hos-lane i.is-near { background: var(--t-Medium); }
+.hos-lane i.is-over { background: var(--t-Critical); }
+.hos-lane i.is-in { background: color-mix(in oklab, var(--accent) 45%, var(--surface-3)); }
+.hos-lane i.is-out { background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--t-Medium) 70%, transparent) 0 2px, transparent 2px 5px); }
+.hos-lane b { position: absolute; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; border-radius: 2px; background: var(--ink); transition: left var(--t-med) var(--ease); }
+.hos-lane--w { height: 8px; }
+
+.hos-split { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(280px, 1fr); gap: var(--s4); align-items: start; }
+.hos-group { font-size: 13px; font-weight: 600; margin: var(--s4) 0 2px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+.hos-group:first-child { margin-top: 0; }
+.hos-group span { font-weight: 400; color: var(--ink-3); font-family: var(--mono); font-size: 12px; margin-left: 6px; }
+.hos-wards { list-style: none; margin: 0; padding: 0; }
+.hos-ward { display: grid; grid-template-columns: 64px 74px minmax(100px, 1fr) 48px 62px 104px; align-items: center; gap: var(--s3);
+            padding: 5px 0; font-size: 13px; }
+.hos-ward + .hos-ward { border-top: 1px solid var(--line); }
+.hos-ward__n { text-align: right; font-size: 12.5px; }
+.hos-ward__n span { color: var(--ink-3); }
+.hos-ward__m { font-size: 12px; color: var(--ink-2); white-space: nowrap; }
+.hos-ward .flag { justify-self: start; }
+.hos-legend { display: flex; flex-wrap: wrap; gap: var(--s4); margin-top: var(--s4); font-size: 12px; color: var(--ink-3); }
+.hos-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.hos-legend i { display: inline-block; width: 14px; height: 8px; border-radius: 3px; background: var(--accent); }
+.hos-legend i.is-in { background: color-mix(in oklab, var(--accent) 45%, var(--surface-3)); }
+.hos-legend i.is-over { background: var(--t-Critical); }
+.hos-legend i.is-out { background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--t-Medium) 70%, transparent) 0 2px, transparent 2px 5px); box-shadow: inset 0 0 0 1px var(--line-2); }
+.hos-legend b { display: inline-block; width: 2px; height: 14px; border-radius: 2px; background: var(--ink); }
+
+.hos-tx { position: sticky; top: 80px; }
+.hos-txlist { list-style: none; margin: 0; padding: 0; max-height: 560px; overflow-y: auto; }
+.hos-txlist li { display: grid; grid-template-columns: 24px 1fr auto; align-items: center; gap: var(--s3); padding: 8px 0; border-top: 1px solid var(--line); font-size: 13.5px; }
+.hos-txlist li:first-child { border-top: 0; }
+.hos-tx__i { color: var(--ink-3); font-size: 12px; }
+.hos-tx__r b { font-weight: 600; }
+.hos-tx__r span { color: var(--accent-ink); font-weight: 600; }
+.hos-tx__r small { display: block; font-size: 11.5px; color: var(--ink-3); }
+.hos-tx__p { font-size: 12.5px; color: var(--ink-2); }
+
+@media (max-width: 1024px) {
+  .hos-split { grid-template-columns: 1fr; }
+  .hos-tx { position: static; }
+}
+@media (max-width: 760px) {
+  .hos-controls { grid-template-columns: 1fr; gap: var(--s4); }
+  .hos-cities li { grid-template-columns: 1fr auto; gap: 6px var(--s3); }
+  .hos-cities .hos-lane { grid-column: 1 / -1; grid-row: 2; }
+  .hos-city__x { grid-column: 1 / -1; flex-direction: row; align-items: center; gap: var(--s3); }
+  .hos-ward { grid-template-columns: 56px 1fr 44px; gap: 4px var(--s3); }
+  .hos-ward .tier, .hos-ward__m { display: none; }
+  .hos-ward .flag { grid-column: 1 / -1; }
+  .hos-ward .hos-lane { grid-column: 2; }
+}
+@media (forced-colors: active) { .hos-lane i, .hos-lane b { forced-color-adjust: none; } }

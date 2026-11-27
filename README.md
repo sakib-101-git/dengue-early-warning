@@ -63,6 +63,11 @@ Three views, switched from the top bar; every view's settings live in the URL, s
   - Wards are served in priority order. Critical wards are filled first, then the rest by expected cases × population-density weight.
   - Headline cards show required vs. available per supply and the number of **critical supply deficits**.
   - A ranked plan shows coverage bars, crews assigned vs. needed, and CRITICAL DEFICIT / WARNING badges.
+- **Hospitals (surge and overflow routing):**
+  - Projected bed demand per ward, for expected or surge (upper-forecast) demand, against an assumed capacity. Each ward's baseline is the P95 of its weekly bed need in training years. A **capacity scale** slider (50–200%) adjusts it.
+  - Overflow is routed automatically to lower-burden wards **in the same city only**: largest deficit first, to the non-Critical ward with the most free beds.
+  - Shows city bed utilisation, overflow before routing, patients routed, **unresolved overflow** and remaining headroom.
+  - Per-ward demand-vs-capacity bars and a transfer list (from → to, patients).
 
 ## Results (held-out test 2024–2025, never used for training or tuning)
 
@@ -92,6 +97,7 @@ src/train.py               model comparison, training, metrics, joblib export
 src/predict.py             RiskEngine: forecasts, TreeSHAP drivers, what-if
 src/experiments.py         ensembles / tuning / neural-net comparison
 src/resources.py           supply rates, ward priority, scarce-stock greedy allocation, crews
+src/hospitals.py           assumed bed capacity, ward deficits, greedy intra-city overflow routing
 server/api.py              FastAPI JSON API over the RiskEngine + serves web/
 server/__main__.py         `python -m server` launcher (uvicorn, opens the browser)
 web/index.html             app shell (top bar, navigation, theme toggle)
@@ -104,6 +110,7 @@ tests/test_features.py     lag/leakage tests
 tests/test_api.py          API tests: every endpoint, city, horizon, date edge and simulation extreme
 tests/test_data.py         onsite dataset = Phase 1 dataset + supply columns (forecasts unchanged)
 tests/test_resources.py    allocation: rates, priority, conservation, Critical-first, flags, crews, 400s
+tests/test_hospitals.py    overflow: capacity rule, no cross-city transfers, sent = received, utilisation maths
 ```
 
 ## Tech stack
@@ -129,7 +136,7 @@ tests/test_resources.py    allocation: rates, priority, conservation, Critical-f
 | Tool / API | Used for |
 |---|---|
 | Claude (Anthropic, claude.ai) | Planning, exploring the data, drafting code for the feature pipeline, training script, inference engine and dashboard, and drafting documentation. The team reviewed, ran, tested and modified all code and can explain it. |
-| Claude Code (Anthropic) | Building the web frontend (server/, web/), API tests and the Streamlit restyle. In Phase 2, drafting the resource allocation engine, its API, tests and the Resources view. The team reviewed, ran and tested all changes. |
+| Claude Code (Anthropic) | Building the web frontend (server/, web/), API tests and the Streamlit restyle. In Phase 2, drafting the resource allocation and hospital overflow engines, their APIs, tests and the Resources and Hospitals views. The team reviewed, ran and tested all changes. |
 
 **External APIs at runtime: none.** The app makes no network calls and uses no LLM.
 

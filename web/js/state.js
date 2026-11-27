@@ -1,12 +1,14 @@
 // App state <-> URL. Every view is shareable and the back button works.
-const KEYS = ["view", "city", "ward", "h", "date", "rain", "temp", "hum", "year", "scope", "stock", "crews", "floor"];
-const NUMERIC = new Set(["h", "rain", "temp", "hum", "year", "stock", "crews", "floor"]);
-const VIEWS = ["ward", "city", "model", "resources"];
+const KEYS = ["view", "city", "ward", "h", "date", "rain", "temp", "hum", "year", "scope", "stock", "crews", "floor", "cap", "basis"];
+const NUMERIC = new Set(["h", "rain", "temp", "hum", "year", "stock", "crews", "floor", "cap"]);
+const VIEWS = ["ward", "city", "model", "resources", "hospitals"];
 // Resources defaults: a scarce-but-workable scenario so the allocation engine has something to do.
 export const RES_DEFAULTS = { scope: "all", stock: 60, crews: 40, floor: 0 };
+// Hospitals defaults: assumed capacity as derived (100%), planning for surge demand (upper end of the forecast).
+export const HOSP_DEFAULTS = { cap: 100, basis: "surge" };
 
 const listeners = new Set();
-export const state = { view: "ward", city: "", ward: "", h: 3, date: "", rain: 0, temp: 0, hum: 0, year: 0, ...RES_DEFAULTS };
+export const state = { view: "ward", city: "", ward: "", h: 3, date: "", rain: 0, temp: 0, hum: 0, year: 0, ...RES_DEFAULTS, ...HOSP_DEFAULTS };
 let meta = null;
 
 export function initState(m) {
@@ -47,6 +49,8 @@ function sanitize() {
   state.stock = state.stock ? clamp(Math.round(state.stock), 30, 100) : RES_DEFAULTS.stock;
   state.crews = clamp(Math.round(state.crews), 0, 1000);
   state.floor = state.floor === 20 ? 20 : 0;
+  state.cap = state.cap ? clamp(Math.round(state.cap / 5) * 5, 50, 200) : HOSP_DEFAULTS.cap;
+  if (state.basis !== "expected" && state.basis !== "surge") state.basis = HOSP_DEFAULTS.basis;
 }
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, Number(v) || 0));
@@ -68,6 +72,7 @@ function toUrl() {
     q.set("scope", state.scope); q.set("stock", String(state.stock)); q.set("crews", String(state.crews));
     if (state.floor) q.set("floor", String(state.floor));
   }
+  if (state.view === "hospitals") { q.set("scope", state.scope); q.set("cap", String(state.cap)); q.set("basis", state.basis); }
   return `${location.pathname}?${q}`;
 }
 
